@@ -67,3 +67,53 @@ func TestNormalizeArch(t *testing.T) {
 		}
 	}
 }
+
+func TestPlatformTriple(t *testing.T) {
+	tests := []struct {
+		goos, goarch string
+		want         string
+	}{
+		{"darwin", "arm64", "aarch64-apple-darwin"},
+		{"darwin", "amd64", "x86_64-apple-darwin"},
+		{"linux", "amd64", "x86_64-unknown-linux-gnu"},
+		{"linux", "arm64", "aarch64-unknown-linux-gnu"},
+		{"windows", "amd64", "x86_64-pc-windows-msvc"},
+		{"linux", "386", "i686-unknown-linux-gnu"},
+	}
+	for _, tt := range tests {
+		got := platformTriple(tt.goos, tt.goarch)
+		if got != tt.want {
+			t.Errorf("platformTriple(%q, %q) = %q, want %q", tt.goos, tt.goarch, got, tt.want)
+		}
+	}
+}
+
+func TestExpandPatternTriple(t *testing.T) {
+	pattern := "tool-{{triple}}.tar.gz"
+	got := ExpandPattern(pattern)
+	want := "tool-" + platformTriple(runtime.GOOS, runtime.GOARCH) + ".tar.gz"
+	if got != want {
+		t.Errorf("ExpandPattern(%q) = %q, want %q", pattern, got, want)
+	}
+}
+
+func TestParseBinSpec(t *testing.T) {
+	tests := []struct {
+		spec       string
+		wantSource string
+		wantLink   string
+	}{
+		{"fzf", "fzf", "fzf"},
+		{"jq-macos-arm64:jq", "jq-macos-arm64", "jq"},
+		{"yq_darwin_arm64:yq", "yq_darwin_arm64", "yq"},
+		{"bin/tool:tool", "bin/tool", "tool"},
+		{":bad", ":bad", ":bad"},       // leading colon, no valid split
+		{"bad:", "bad:", "bad:"},         // trailing colon, no valid split
+	}
+	for _, tt := range tests {
+		src, link := parseBinSpec(tt.spec)
+		if src != tt.wantSource || link != tt.wantLink {
+			t.Errorf("parseBinSpec(%q) = (%q, %q), want (%q, %q)", tt.spec, src, link, tt.wantSource, tt.wantLink)
+		}
+	}
+}

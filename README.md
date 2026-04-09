@@ -22,6 +22,12 @@ gh tool install jqlang/jq --pattern 'jq-macos-arm64' --tag jq-1.7.1
 # Install with architecture template variables
 gh tool install junegunn/fzf --pattern 'fzf-*-{{os}}_{{arch}}.tar.gz'
 
+# Install a Rust tool using platform triples
+gh tool install BurntSushi/ripgrep --pattern 'ripgrep-*-{{triple}}.tar.gz'
+
+# Install a bare binary with rename (source:target)
+gh tool install jqlang/jq --pattern 'jq-macos-arm64' --bin 'jq-macos-arm64:jq'
+
 # List installed tools and check for updates
 gh tool list
 
@@ -58,14 +64,24 @@ bin = ["fzf"]
 repo = "jqlang/jq"
 pattern = "jq-macos-arm64"
 tag = "jq-1.7.1"
-bin = ["jq"]
+bin = ["jq-macos-arm64:jq"]
+
+[[tool]]
+repo = "BurntSushi/ripgrep"
+pattern = "ripgrep-*-{{triple}}.tar.gz"
+bin = ["rg"]
 
 [[tool]]
 repo = "dandavison/delta"
-pattern = "delta-*-aarch64-apple-darwin.tar.gz"
+pattern = "delta-*-{{triple}}.tar.gz"
 bin = ["delta"]
 man = ["delta.1.gz"]
 completions = ["completion/_delta"]
+
+[[tool]]
+repo = "mikefarah/yq"
+pattern = "yq_{{os}}_{{arch}}.tar.gz"
+bin = ["yq_darwin_arm64:yq"]
 ```
 
 Install all tools from the manifest at once:
@@ -79,11 +95,35 @@ gh tool install
 | Attribute     | Description                                                   | Default        |
 |---------------|---------------------------------------------------------------|----------------|
 | `repo`        | GitHub `owner/repo`                                           | required       |
-| `pattern`     | Glob for release asset (supports `{{os}}`, `{{arch}}`)        | required       |
+| `pattern`     | Glob for release asset (supports `{{os}}`, `{{arch}}`, `{{triple}}`) | required       |
 | `tag`         | Release tag to pin                                            | latest         |
-| `bin`         | Binary name(s) to symlink                                     | `[<toolname>]` |
+| `bin`         | Binary name(s) to symlink; use `source:link` to rename        | `[<toolname>]` |
 | `man`         | Man page path(s) relative to extracted archive                | none           |
 | `completions` | Shell completion path(s) relative to extracted archive        | none           |
+
+### Pattern Variables
+
+Patterns support template variables that expand to platform-specific values at runtime:
+
+| Variable      | Example (macOS ARM64)          | Example (Linux x86_64)             |
+|---------------|-------------------------------|-------------------------------------|
+| `{{os}}`      | `darwin`                      | `linux`                             |
+| `{{arch}}`    | `arm64`                       | `amd64`                             |
+| `{{triple}}`  | `aarch64-apple-darwin`        | `x86_64-unknown-linux-gnu`          |
+
+Use `{{triple}}` for Rust-style release naming conventions (e.g., `ripgrep-*-{{triple}}.tar.gz`).
+
+### Binary Renaming
+
+When a downloaded binary or extracted file has a platform-specific name but you want a clean symlink, use the `source:link` syntax in `bin`:
+
+```toml
+# Downloaded asset is "jq-macos-arm64", symlink as "jq"
+bin = ["jq-macos-arm64:jq"]
+
+# Extracted binary is "yq_darwin_arm64", symlink as "yq"  
+bin = ["yq_darwin_arm64:yq"]
+```
 
 ## Commands
 
@@ -102,8 +142,8 @@ gh tool version                 Print version
 
 1. `gh tool install` downloads a release asset via `gh release download` into a cache directory
 2. The asset is verified with `gh attestation verify` (best-effort — most repos don't publish attestations yet)
-3. Archives (tar.gz, zip) are extracted; bare binaries are copied directly. If an archive has a single top-level directory, it is stripped automatically
-4. Symlinks are created from `$XDG_DATA_HOME/gh-tool/bin/` into the extracted tool directory
+3. Archives (tar.gz, tar.xz, zip) are extracted; bare binaries are copied directly. If an archive has a single top-level directory, it is stripped automatically
+4. Symlinks are created from `$XDG_DATA_HOME/gh-tool/bin/` into the extracted tool directory. Use `source:link` in `bin` to rename binaries (e.g., `jq-macos-arm64:jq`)
 5. The tool is recorded in the manifest and a state file tracks the installed version
 
 ## Filesystem Layout

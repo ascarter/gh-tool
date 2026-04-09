@@ -5,6 +5,7 @@ import (
 	"archive/zip"
 	"compress/gzip"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 )
@@ -86,6 +87,65 @@ func TestExtractBareBinary(t *testing.T) {
 	}
 	if info.Mode()&0o111 == 0 {
 		t.Error("bare binary should be executable")
+	}
+}
+
+func TestExtractTarXz(t *testing.T) {
+	// Skip if xz is not installed
+	if _, err := exec.LookPath("xz"); err != nil {
+		t.Skip("xz not installed, skipping tar.xz test")
+	}
+
+	// Create a tar first, then xz compress it
+	tarPath := filepath.Join(t.TempDir(), "test.tar")
+	f, err := os.Create(tarPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tw := tar.NewWriter(f)
+
+	// Write a directory entry
+	if err := tw.WriteHeader(&tar.Header{
+		Typeflag: tar.TypeDir,
+		Name:     "rv-1.0/",
+		Mode:     0o755,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Write a file entry
+	content := "binary-content"
+	if err := tw.WriteHeader(&tar.Header{
+		Name: "rv-1.0/rv",
+		Mode: 0o755,
+		Size: int64(len(content)),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tw.Write([]byte(content)); err != nil {
+		t.Fatal(err)
+	}
+	tw.Close()
+	f.Close()
+
+	// Compress with xz
+	cmd := exec.Command("xz", tarPath)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("xz compress: %s: %v", out, err)
+	}
+
+	xzPath := tarPath + ".xz"
+	dest := t.TempDir()
+	if err := Extract(xzPath, dest); err != nil {
+		t.Fatalf("Extract tar.xz: %v", err)
+	}
+
+	// Leading dir should be stripped
+	assertFileExists(t, filepath.Join(dest, "rv"))
+
+	// Leading dir itself should NOT exist
+	if _, err := os.Stat(filepath.Join(dest, "rv-1.0")); err == nil {
+		t.Error("leading directory should have been stripped")
 	}
 }
 

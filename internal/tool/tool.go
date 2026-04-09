@@ -163,13 +163,14 @@ func (m *Manager) createSymlinks(t config.Tool, toolDir string) error {
 
 	// Bin symlinks
 	for _, bin := range bins {
-		src := findFileInDir(toolDir, bin)
+		srcName, linkName := parseBinSpec(bin)
+		src := findFileInDir(toolDir, srcName)
 		if src == "" {
-			return fmt.Errorf("binary %q not found in extracted files", bin)
+			return fmt.Errorf("binary %q not found in extracted files", srcName)
 		}
-		dst := filepath.Join(m.Dirs.BinDir(), filepath.Base(bin))
+		dst := filepath.Join(m.Dirs.BinDir(), linkName)
 		if err := forceSymlink(src, dst); err != nil {
-			return fmt.Errorf("symlink %s: %w", bin, err)
+			return fmt.Errorf("symlink %s: %w", linkName, err)
 		}
 	}
 
@@ -213,7 +214,8 @@ func (m *Manager) removeSymlinks(t config.Tool) {
 	}
 
 	for _, bin := range bins {
-		_ = os.Remove(filepath.Join(m.Dirs.BinDir(), filepath.Base(bin)))
+		_, linkName := parseBinSpec(bin)
+		_ = os.Remove(filepath.Join(m.Dirs.BinDir(), linkName))
 	}
 	for _, man := range t.Man {
 		_ = os.Remove(filepath.Join(m.Dirs.ManDir(), filepath.Base(man)))
@@ -309,13 +311,15 @@ func verifyAttestation(repo, assetPath string) {
 	}
 }
 
-// ExpandPattern replaces {{os}} and {{arch}} placeholders in a pattern
+// ExpandPattern replaces {{os}}, {{arch}}, and {{triple}} placeholders in a pattern
 // with runtime-detected values.
 func ExpandPattern(pattern string) string {
 	os := normalizeOS(runtime.GOOS)
 	arch := normalizeArch(runtime.GOARCH)
+	triple := platformTriple(runtime.GOOS, runtime.GOARCH)
 	pattern = strings.ReplaceAll(pattern, "{{os}}", os)
 	pattern = strings.ReplaceAll(pattern, "{{arch}}", arch)
+	pattern = strings.ReplaceAll(pattern, "{{triple}}", triple)
 	return pattern
 }
 
@@ -343,4 +347,41 @@ func normalizeArch(goarch string) string {
 	default:
 		return goarch
 	}
+}
+
+// platformTriple returns a Rust-style target triple for the current platform.
+// Examples: x86_64-unknown-linux-gnu, aarch64-apple-darwin, x86_64-pc-windows-msvc
+func platformTriple(goos, goarch string) string {
+	var arch string
+	switch goarch {
+	case "amd64":
+		arch = "x86_64"
+	case "arm64":
+		arch = "aarch64"
+	case "386":
+		arch = "i686"
+	default:
+		arch = goarch
+	}
+
+	switch goos {
+	case "darwin":
+		return arch + "-apple-darwin"
+	case "linux":
+		return arch + "-unknown-linux-gnu"
+	case "windows":
+		return arch + "-pc-windows-msvc"
+	default:
+		return arch + "-" + goos
+	}
+}
+
+// parseBinSpec parses a bin entry which may be "name" or "source:link".
+// "name" means find and symlink as "name".
+// "source:link" means find "source" in the extracted files and create a symlink named "link".
+func parseBinSpec(spec string) (source, link string) {
+	if idx := strings.Index(spec, ":"); idx > 0 && idx < len(spec)-1 {
+		return spec[:idx], spec[idx+1:]
+	}
+	return spec, spec
 }

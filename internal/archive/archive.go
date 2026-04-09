@@ -7,12 +7,13 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 )
 
 // Extract unpacks an archive file into destDir.
-// Supports .tar.gz, .tgz, and .zip formats.
+// Supports .tar.gz, .tgz, .tar.xz, .txz, and .zip formats.
 // If the archive has a single top-level directory, its contents are promoted up
 // (the leading directory is stripped).
 // For non-archive files (bare binaries), the file is copied directly and made executable.
@@ -25,6 +26,8 @@ func Extract(archivePath, destDir string) error {
 	switch {
 	case strings.HasSuffix(lower, ".tar.gz") || strings.HasSuffix(lower, ".tgz"):
 		return extractTarGz(archivePath, destDir)
+	case strings.HasSuffix(lower, ".tar.xz") || strings.HasSuffix(lower, ".txz"):
+		return extractTarXz(archivePath, destDir)
 	case strings.HasSuffix(lower, ".zip"):
 		return extractZip(archivePath, destDir)
 	default:
@@ -33,6 +36,8 @@ func Extract(archivePath, destDir string) error {
 }
 
 func extractTarGz(archivePath, destDir string) error {
+	prefix := detectTarPrefix(archivePath)
+
 	f, err := os.Open(archivePath)
 	if err != nil {
 		return err
@@ -45,23 +50,44 @@ func extractTarGz(archivePath, destDir string) error {
 	}
 	defer gz.Close()
 
-	// First pass: detect if we should strip a leading directory
-	prefix := detectTarPrefix(archivePath)
+	return extractTar(gz, destDir, prefix)
+}
 
-	// Reset and re-open for extraction
-	f2, err := os.Open(archivePath)
+func extractTarXz(archivePath, destDir string) error {
+	// xz decompression requires the xz command since Go stdlib doesn't include it
+	if _, err := exec.LookPath("xz"); err != nil {
+		return fmt.Errorf("xz command not found (required for .tar.xz): %w", err)
+	}
+
+	// Decompress to a temporary .tar file
+	tarPath := strings.TrimSuffix(archivePath, filepath.Ext(archivePath))
+	if tarPath == archivePath {
+		tarPath = archivePath + ".tar"
+	}
+
+	// Run xz -dk to decompress (keep original, force overwrite)
+	cmd := exec.Command("xz", "-dkf", archivePath)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("xz decompress: %s: %w", string(out), err)
+	}
+	defer os.Remove(tarPath)
+
+	// Detect prefix from the decompressed tar
+	prefix := detectTarPrefixFromFile(tarPath)
+
+	// Extract the tar
+	f, err := os.Open(tarPath)
 	if err != nil {
 		return err
 	}
-	defer f2.Close()
+	defer f.Close()
 
-	gz2, err := gzip.NewReader(f2)
-	if err != nil {
-		return err
-	}
-	defer gz2.Close()
+	return extractTar(f, destDir, prefix)
+}
 
-	tr := tar.NewReader(gz2)
+// extractTar reads tar entries from r and writes them to destDir, stripping prefix.
+func extractTar(r io.Reader, destDir, prefix string) error {
+	tr := tar.NewReader(r)
 	for {
 		hdr, err := tr.Next()
 		if err == io.EOF {
@@ -81,7 +107,6 @@ func extractTarGz(archivePath, destDir string) error {
 
 		target := filepath.Join(destDir, filepath.FromSlash(name))
 
-		// Validate path doesn't escape destDir
 		if !strings.HasPrefix(filepath.Clean(target), filepath.Clean(destDir)) {
 			return fmt.Errorf("tar entry escapes destination: %s", hdr.Name)
 		}
@@ -112,6 +137,36 @@ func extractTarGz(archivePath, destDir string) error {
 	return nil
 }
 
+func detectTarPrefixFromFile(tarPath string) string {
+	f, err := os.Open(tarPath)
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+	return detectTarPrefixFromReader(f)
+}
+
+func detectTarPrefixFromReader(r io.Reader) string {
+	tr := tar.NewReader(r)
+	topDirs := make(map[string]bool)
+	for {
+		hdr, err := tr.Next()
+		if err != nil {
+			break
+		}
+		parts := strings.SplitN(filepath.ToSlash(hdr.Name), "/", 2)
+		if len(parts) > 0 && parts[0] != "." {
+			topDirs[parts[0]] = true
+		}
+	}
+	if len(topDirs) == 1 {
+		for dir := range topDirs {
+			return dir + "/"
+		}
+	}
+	return ""
+}
+
 func detectTarPrefix(archivePath string) string {
 	f, err := os.Open(archivePath)
 	if err != nil {
@@ -125,26 +180,7 @@ func detectTarPrefix(archivePath string) string {
 	}
 	defer gz.Close()
 
-	tr := tar.NewReader(gz)
-	var topDirs = make(map[string]bool)
-	for {
-		hdr, err := tr.Next()
-		if err != nil {
-			break
-		}
-		parts := strings.SplitN(filepath.ToSlash(hdr.Name), "/", 2)
-		if len(parts) > 0 && parts[0] != "." {
-			topDirs[parts[0]] = true
-		}
-	}
-
-	// Only strip if there's exactly one top-level directory
-	if len(topDirs) == 1 {
-		for dir := range topDirs {
-			return dir + "/"
-		}
-	}
-	return ""
+	return detectTarPrefixFromReader(gz)
 }
 
 func extractZip(archivePath, destDir string) error {
