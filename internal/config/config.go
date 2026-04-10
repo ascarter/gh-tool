@@ -24,12 +24,26 @@ type Settings struct {
 
 // Tool describes a single tool to install from a GitHub release.
 type Tool struct {
-	Repo        string   `toml:"repo"`
-	Pattern     string   `toml:"pattern,omitempty"`
-	Tag         string   `toml:"tag,omitempty"`
-	Bin         []string `toml:"bin,omitempty"`
-	Man         []string `toml:"man,omitempty"`
-	Completions []string `toml:"completions,omitempty"`
+	Repo        string            `toml:"repo"`
+	Pattern     string            `toml:"pattern,omitempty"`
+	Patterns    map[string]string `toml:"patterns,omitempty"`
+	Tag         string            `toml:"tag,omitempty"`
+	Bin         []string          `toml:"bin,omitempty"`
+	Man         []string          `toml:"man,omitempty"`
+	Completions []string          `toml:"completions,omitempty"`
+}
+
+// ResolvePattern returns the pattern for the given OS and architecture.
+// It checks the platform-specific patterns map first (keyed by "goos_goarch",
+// e.g. "darwin_arm64"), then falls back to the default pattern.
+func (t Tool) ResolvePattern(goos, goarch string) string {
+	if len(t.Patterns) > 0 {
+		key := goos + "_" + goarch
+		if p, ok := t.Patterns[key]; ok {
+			return p
+		}
+	}
+	return t.Pattern
 }
 
 // Name returns the tool name derived from the repo (the part after /).

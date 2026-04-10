@@ -311,15 +311,26 @@ func verifyAttestation(repo, assetPath string) {
 	}
 }
 
-// ExpandPattern replaces {{os}}, {{arch}}, and {{triple}} placeholders in a pattern
-// with runtime-detected values.
+// ExpandPattern replaces template placeholders in a pattern with runtime-detected values.
+//
+// Supported variables:
+//
+//	{{os}}       — Go-style OS name: darwin, linux, windows
+//	{{arch}}     — Go-style arch: arm64, amd64, i386
+//	{{triple}}   — Rust target triple: aarch64-apple-darwin, x86_64-unknown-linux-gnu, …
+//	{{platform}} — User-facing OS name: macos, linux, windows
+//	{{gnuarch}}  — GNU/Rust-style arch: aarch64, x86_64, i686
 func ExpandPattern(pattern string) string {
 	os := normalizeOS(runtime.GOOS)
 	arch := normalizeArch(runtime.GOARCH)
 	triple := platformTriple(runtime.GOOS, runtime.GOARCH)
+	platform := platformName(runtime.GOOS)
+	gnu := gnuArch(runtime.GOARCH)
 	pattern = strings.ReplaceAll(pattern, "{{os}}", os)
 	pattern = strings.ReplaceAll(pattern, "{{arch}}", arch)
 	pattern = strings.ReplaceAll(pattern, "{{triple}}", triple)
+	pattern = strings.ReplaceAll(pattern, "{{platform}}", platform)
+	pattern = strings.ReplaceAll(pattern, "{{gnuarch}}", gnu)
 	return pattern
 }
 
@@ -349,20 +360,36 @@ func normalizeArch(goarch string) string {
 	}
 }
 
+// platformName returns the user-facing platform name for a GOOS value.
+// Examples: darwin → macos, linux → linux, windows → windows
+func platformName(goos string) string {
+	switch goos {
+	case "darwin":
+		return "macos"
+	default:
+		return goos
+	}
+}
+
+// gnuArch returns the GNU/Rust-style architecture name for a GOARCH value.
+// Examples: arm64 → aarch64, amd64 → x86_64, 386 → i686
+func gnuArch(goarch string) string {
+	switch goarch {
+	case "amd64":
+		return "x86_64"
+	case "arm64":
+		return "aarch64"
+	case "386":
+		return "i686"
+	default:
+		return goarch
+	}
+}
+
 // platformTriple returns a Rust-style target triple for the current platform.
 // Examples: x86_64-unknown-linux-gnu, aarch64-apple-darwin, x86_64-pc-windows-msvc
 func platformTriple(goos, goarch string) string {
-	var arch string
-	switch goarch {
-	case "amd64":
-		arch = "x86_64"
-	case "arm64":
-		arch = "aarch64"
-	case "386":
-		arch = "i686"
-	default:
-		arch = goarch
-	}
+	arch := gnuArch(goarch)
 
 	switch goos {
 	case "darwin":

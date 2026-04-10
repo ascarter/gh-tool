@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"runtime"
 
 	"github.com/spf13/cobra"
 
@@ -55,7 +56,11 @@ func runInstall(cmd *cobra.Command, args []string) error {
 		}
 		verify := !flagNoVerify
 		for _, t := range cfg.Tools {
+			t.Pattern = t.ResolvePattern(runtime.GOOS, runtime.GOARCH)
 			t.Pattern = tool.ExpandPattern(t.Pattern)
+			if isUpToDate(mgr, t) {
+				continue
+			}
 			if err := mgr.Install(t, verify); err != nil {
 				fmt.Fprintf(os.Stderr, "✗ %s: %s\n", t.Repo, err)
 			}
@@ -88,12 +93,20 @@ func runInstall(cmd *cobra.Command, args []string) error {
 		t.Completions = flagComp
 	}
 
-	if t.Pattern == "" {
+	if t.Pattern == "" && len(t.Patterns) == 0 {
 		return fmt.Errorf("--pattern is required (which release asset to download)")
 	}
 
-	// Expand {{os}}/{{arch}} template variables
+	// Resolve platform-specific pattern, then expand template variables
+	t.Pattern = t.ResolvePattern(runtime.GOOS, runtime.GOARCH)
 	t.Pattern = tool.ExpandPattern(t.Pattern)
+
+	// Skip if already installed and up-to-date
+	if isUpToDate(mgr, t) {
+		// Still update manifest in case flags changed other fields
+		cfg.AddOrUpdateTool(t)
+		return config.Save(dirs.ConfigFile(), cfg)
+	}
 
 	// Install the tool
 	if err := mgr.Install(t, !flagNoVerify); err != nil {
@@ -103,4 +116,30 @@ func runInstall(cmd *cobra.Command, args []string) error {
 	// Update manifest
 	cfg.AddOrUpdateTool(t)
 	return config.Save(dirs.ConfigFile(), cfg)
+}
+
+// isUpToDate checks whether a tool is already installed at the target version.
+// Returns true (and prints a warning) if the installed version matches, false otherwise.
+func isUpToDate(mgr *tool.Manager, t config.Tool) bool {
+	name := t.Name()
+	state := mgr.ReadState(name)
+	if state == nil {
+		return false
+	}
+
+	targetTag := t.Tag
+	if targetTag == "" || targetTag == "latest" {
+		latest, err := tool.LatestTag(t.Repo)
+		if err != nil {
+			return false
+		}
+		targetTag = latest
+	}
+
+	if state.Tag == targetTag {
+		fmt.Printf("Warning: %s %s is already installed and up-to-date.\n", name, targetTag)
+		return true
+	}
+
+	return false
 }

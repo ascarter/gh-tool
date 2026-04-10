@@ -68,6 +68,40 @@ func TestNormalizeArch(t *testing.T) {
 	}
 }
 
+func TestPlatformName(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"darwin", "macos"},
+		{"linux", "linux"},
+		{"windows", "windows"},
+		{"freebsd", "freebsd"},
+	}
+	for _, tt := range tests {
+		if got := platformName(tt.input); got != tt.want {
+			t.Errorf("platformName(%q) = %q, want %q", tt.input, got, tt.want)
+		}
+	}
+}
+
+func TestGnuArch(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"arm64", "aarch64"},
+		{"amd64", "x86_64"},
+		{"386", "i686"},
+		{"riscv64", "riscv64"},
+	}
+	for _, tt := range tests {
+		if got := gnuArch(tt.input); got != tt.want {
+			t.Errorf("gnuArch(%q) = %q, want %q", tt.input, got, tt.want)
+		}
+	}
+}
+
 func TestPlatformTriple(t *testing.T) {
 	tests := []struct {
 		goos, goarch string
@@ -92,6 +126,24 @@ func TestExpandPatternTriple(t *testing.T) {
 	pattern := "tool-{{triple}}.tar.gz"
 	got := ExpandPattern(pattern)
 	want := "tool-" + platformTriple(runtime.GOOS, runtime.GOARCH) + ".tar.gz"
+	if got != want {
+		t.Errorf("ExpandPattern(%q) = %q, want %q", pattern, got, want)
+	}
+}
+
+func TestExpandPatternPlatform(t *testing.T) {
+	pattern := "tool-{{platform}}-{{arch}}.tar.gz"
+	got := ExpandPattern(pattern)
+	want := "tool-" + platformName(runtime.GOOS) + "-" + normalizeArch(runtime.GOARCH) + ".tar.gz"
+	if got != want {
+		t.Errorf("ExpandPattern(%q) = %q, want %q", pattern, got, want)
+	}
+}
+
+func TestExpandPatternGnuArch(t *testing.T) {
+	pattern := "tool-*.{{os}}.{{gnuarch}}.tar.gz"
+	got := ExpandPattern(pattern)
+	want := "tool-*." + normalizeOS(runtime.GOOS) + "." + gnuArch(runtime.GOARCH) + ".tar.gz"
 	if got != want {
 		t.Errorf("ExpandPattern(%q) = %q, want %q", pattern, got, want)
 	}

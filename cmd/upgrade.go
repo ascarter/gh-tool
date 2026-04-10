@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"runtime"
 
 	"github.com/spf13/cobra"
 
@@ -67,6 +68,7 @@ func runUpgrade(cmd *cobra.Command, args []string) error {
 		// Override tag to latest for the upgrade
 		upgradeT := t
 		upgradeT.Tag = ""
+		upgradeT.Pattern = upgradeT.ResolvePattern(runtime.GOOS, runtime.GOARCH)
 		upgradeT.Pattern = tool.ExpandPattern(upgradeT.Pattern)
 		if err := mgr.Install(upgradeT, true); err != nil {
 			fmt.Fprintf(os.Stderr, "✗ %s: %s\n", t.Repo, err)

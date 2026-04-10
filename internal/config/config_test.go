@@ -166,3 +166,110 @@ func TestLoadParseError(t *testing.T) {
 		t.Error("Load with invalid TOML should error")
 	}
 }
+
+func TestResolvePattern(t *testing.T) {
+	tests := []struct {
+		name     string
+		tool     Tool
+		goos     string
+		goarch   string
+		want     string
+	}{
+		{
+			name:   "no patterns map, uses default",
+			tool:   Tool{Pattern: "tool-{{os}}-{{arch}}.tar.gz"},
+			goos:   "darwin", goarch: "arm64",
+			want: "tool-{{os}}-{{arch}}.tar.gz",
+		},
+		{
+			name: "patterns map hit",
+			tool: Tool{
+				Pattern:  "nvim-{{platform}}-{{arch}}.tar.gz",
+				Patterns: map[string]string{
+					"darwin_amd64": "nvim-macos-x86_64.tar.gz",
+					"linux_amd64":  "nvim-linux-x86_64.tar.gz",
+				},
+			},
+			goos: "darwin", goarch: "amd64",
+			want: "nvim-macos-x86_64.tar.gz",
+		},
+		{
+			name: "patterns map miss, falls back to default",
+			tool: Tool{
+				Pattern:  "nvim-{{platform}}-{{arch}}.tar.gz",
+				Patterns: map[string]string{
+					"darwin_amd64": "nvim-macos-x86_64.tar.gz",
+				},
+			},
+			goos: "darwin", goarch: "arm64",
+			want: "nvim-{{platform}}-{{arch}}.tar.gz",
+		},
+		{
+			name: "patterns map only, no default",
+			tool: Tool{
+				Patterns: map[string]string{
+					"darwin_arm64": "nvim-macos-arm64.tar.gz",
+					"linux_amd64":  "nvim-linux-x86_64.tar.gz",
+				},
+			},
+			goos: "darwin", goarch: "arm64",
+			want: "nvim-macos-arm64.tar.gz",
+		},
+		{
+			name: "patterns map only, miss returns empty",
+			tool: Tool{
+				Patterns: map[string]string{
+					"linux_amd64": "nvim-linux-x86_64.tar.gz",
+				},
+			},
+			goos: "darwin", goarch: "arm64",
+			want: "",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.tool.ResolvePattern(tt.goos, tt.goarch)
+			if got != tt.want {
+				t.Errorf("ResolvePattern(%q, %q) = %q, want %q", tt.goos, tt.goarch, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestLoadSaveWithPatterns(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+
+	cfg := &Config{}
+	cfg.AddOrUpdateTool(Tool{
+		Repo:    "neovim/neovim",
+		Pattern: "nvim-{{platform}}-{{arch}}.tar.gz",
+		Patterns: map[string]string{
+			"darwin_amd64": "nvim-macos-x86_64.tar.gz",
+			"linux_amd64":  "nvim-linux-x86_64.tar.gz",
+		},
+		Bin: []string{"nvim"},
+	})
+
+	if err := Save(path, cfg); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	cfg2, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(cfg2.Tools) != 1 {
+		t.Fatalf("expected 1 tool, got %d", len(cfg2.Tools))
+	}
+	tool := cfg2.Tools[0]
+	if tool.Pattern != "nvim-{{platform}}-{{arch}}.tar.gz" {
+		t.Errorf("pattern = %q, want nvim-{{platform}}-{{arch}}.tar.gz", tool.Pattern)
+	}
+	if len(tool.Patterns) != 2 {
+		t.Fatalf("expected 2 patterns, got %d", len(tool.Patterns))
+	}
+	if tool.Patterns["darwin_amd64"] != "nvim-macos-x86_64.tar.gz" {
+		t.Errorf("patterns[darwin_amd64] = %q", tool.Patterns["darwin_amd64"])
+	}
+}
