@@ -143,14 +143,14 @@ Resolution order:
 
 ### Binary Renaming
 
-When a downloaded binary or extracted file has a platform-specific name but you want a clean symlink, use the `source:link` syntax in `bin`:
+When a downloaded binary or extracted file has a platform-specific name but you want a clean symlink, use the `source:link` syntax in `bin`. Template variables are supported in `bin` specs:
 
 ```toml
-# Downloaded asset is "jq-macos-arm64", symlink as "jq"
-bin = ["jq-macos-arm64:jq"]
+# Downloaded asset is "jq-macos-arm64", symlink as "jq" (cross-platform)
+bin = ["jq-{{platform}}-{{arch}}:jq"]
 
-# Extracted binary is "yq_darwin_arm64", symlink as "yq"  
-bin = ["yq_darwin_arm64:yq"]
+# Bare binary with OS/arch in name
+bin = ["direnv.{{os}}-{{arch}}:direnv"]
 ```
 
 ## Commands

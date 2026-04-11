@@ -163,6 +163,7 @@ func (m *Manager) createSymlinks(t config.Tool, toolDir string) error {
 
 	// Bin symlinks
 	for _, bin := range bins {
+		bin = ExpandPattern(bin)
 		srcName, linkName := parseBinSpec(bin)
 		src := findFileInDir(toolDir, srcName)
 		if src == "" {
