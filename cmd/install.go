@@ -97,6 +97,9 @@ func runInstall(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("--pattern is required (which release asset to download)")
 	}
 
+	// Preserve original config for manifest (before pattern expansion)
+	manifestTool := t
+
 	// Resolve platform-specific pattern, then expand template variables
 	t.Pattern = t.ResolvePattern(runtime.GOOS, runtime.GOARCH)
 	t.Pattern = tool.ExpandPattern(t.Pattern)
@@ -104,7 +107,7 @@ func runInstall(cmd *cobra.Command, args []string) error {
 	// Skip if already installed and up-to-date
 	if isUpToDate(mgr, t) {
 		// Still update manifest in case flags changed other fields
-		cfg.AddOrUpdateTool(t)
+		cfg.AddOrUpdateTool(manifestTool)
 		return config.Save(dirs.ConfigFile(), cfg)
 	}
 
@@ -113,8 +116,8 @@ func runInstall(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// Update manifest
-	cfg.AddOrUpdateTool(t)
+	// Update manifest with original (unexpanded) config
+	cfg.AddOrUpdateTool(manifestTool)
 	return config.Save(dirs.ConfigFile(), cfg)
 }
 
