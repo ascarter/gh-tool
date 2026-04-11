@@ -31,6 +31,21 @@ type Tool struct {
 	Bin         []string          `toml:"bin,omitempty"`
 	Man         []string          `toml:"man,omitempty"`
 	Completions []string          `toml:"completions,omitempty"`
+	OS          []string          `toml:"os,omitempty"`
+}
+
+// ShouldInstallOn reports whether the tool should be installed on the given OS.
+// If OS is empty (no filter), the tool is installed everywhere.
+func (t Tool) ShouldInstallOn(goos string) bool {
+	if len(t.OS) == 0 {
+		return true
+	}
+	for _, o := range t.OS {
+		if o == goos {
+			return true
+		}
+	}
+	return false
 }
 
 // ResolvePattern returns the pattern for the given OS and architecture.

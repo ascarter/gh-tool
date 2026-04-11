@@ -273,3 +273,80 @@ func TestLoadSaveWithPatterns(t *testing.T) {
 		t.Errorf("patterns[darwin_amd64] = %q", tool.Patterns["darwin_amd64"])
 	}
 }
+
+func TestShouldInstallOn(t *testing.T) {
+	tests := []struct {
+		name string
+		tool Tool
+		goos string
+		want bool
+	}{
+		{
+			name: "no OS filter, installs everywhere",
+			tool: Tool{Repo: "junegunn/fzf"},
+			goos: "darwin",
+			want: true,
+		},
+		{
+			name: "OS filter matches",
+			tool: Tool{Repo: "neovim/neovim", OS: []string{"linux", "darwin"}},
+			goos: "darwin",
+			want: true,
+		},
+		{
+			name: "OS filter does not match",
+			tool: Tool{Repo: "neovim/neovim", OS: []string{"linux"}},
+			goos: "darwin",
+			want: false,
+		},
+		{
+			name: "single OS matches",
+			tool: Tool{Repo: "neovim/neovim", OS: []string{"darwin"}},
+			goos: "darwin",
+			want: true,
+		},
+		{
+			name: "single OS does not match",
+			tool: Tool{Repo: "neovim/neovim", OS: []string{"darwin"}},
+			goos: "linux",
+			want: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.tool.ShouldInstallOn(tt.goos)
+			if got != tt.want {
+				t.Errorf("ShouldInstallOn(%q) = %v, want %v", tt.goos, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestLoadSaveWithOS(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+
+	cfg := &Config{}
+	cfg.AddOrUpdateTool(Tool{
+		Repo:    "neovim/neovim",
+		Pattern: "nvim-{{platform}}-{{arch}}.tar.gz",
+		OS:      []string{"linux"},
+		Bin:     []string{"nvim"},
+	})
+
+	if err := Save(path, cfg); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	cfg2, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(cfg2.Tools) != 1 {
+		t.Fatalf("expected 1 tool, got %d", len(cfg2.Tools))
+	}
+	tool := cfg2.Tools[0]
+	if len(tool.OS) != 1 || tool.OS[0] != "linux" {
+		t.Errorf("os = %v, want [linux]", tool.OS)
+	}
+}

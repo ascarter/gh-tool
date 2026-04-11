@@ -56,6 +56,10 @@ func runInstall(cmd *cobra.Command, args []string) error {
 		}
 		verify := !flagNoVerify
 		for _, t := range cfg.Tools {
+			if !t.ShouldInstallOn(runtime.GOOS) {
+				fmt.Printf("· %s skipped on %s\n", t.Name(), runtime.GOOS)
+				continue
+			}
 			t.Pattern = t.ResolvePattern(runtime.GOOS, runtime.GOARCH)
 			t.Pattern = tool.ExpandPattern(t.Pattern)
 			if isUpToDate(mgr, t) {

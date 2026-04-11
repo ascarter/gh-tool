@@ -101,6 +101,7 @@ gh tool install
 | `bin`         | Binary name(s) to symlink; use `source:link` to rename        | `[<toolname>]` |
 | `man`         | Man page path(s) relative to extracted archive                | none           |
 | `completions` | Shell completion path(s) relative to extracted archive        | none           |
+| `os`          | OS filter; install only on listed OSes (e.g., `["linux"]`)    | all            |
 
 *Either `pattern` or `patterns` must be provided.
 
@@ -152,6 +153,21 @@ bin = ["jq-{{platform}}-{{arch}}:jq"]
 # Bare binary with OS/arch in name
 bin = ["direnv.{{os}}-{{arch}}:direnv"]
 ```
+
+### OS Filtering
+
+Use `os` to restrict a tool to specific operating systems. This is useful when you manage a tool through another package manager (e.g., Homebrew) on one OS but want `gh-tool` on others:
+
+```toml
+# Only install neovim on Linux (use Homebrew on macOS)
+[[tool]]
+repo = "neovim/neovim"
+pattern = "nvim-linux-{{gnuarch}}.tar.gz"
+os = ["linux"]
+bin = ["nvim"]
+```
+
+Values are Go-style OS names: `darwin`, `linux`, `windows`. If `os` is omitted, the tool installs on all platforms.
 
 ## Commands
 

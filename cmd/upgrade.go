@@ -52,6 +52,12 @@ func runUpgrade(cmd *cobra.Command, args []string) error {
 
 	for _, t := range tools {
 		name := t.Name()
+
+		if !t.ShouldInstallOn(runtime.GOOS) {
+			fmt.Printf("· %s skipped on %s\n", name, runtime.GOOS)
+			continue
+		}
+
 		state := mgr.ReadState(name)
 
 		latest, err := tool.LatestTag(t.Repo)

@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"runtime"
 
 	"github.com/cli/go-gh/v2/pkg/tableprinter"
 	"github.com/cli/go-gh/v2/pkg/term"
@@ -49,6 +50,17 @@ func runList(cmd *cobra.Command, args []string) error {
 
 	for _, t := range cfg.Tools {
 		name := t.Name()
+
+		// If the tool is filtered to other OSes, show it as skipped
+		if !t.ShouldInstallOn(runtime.GOOS) {
+			tp.AddField(t.Repo)
+			tp.AddField("-")
+			tp.AddField("-")
+			tp.AddField("skipped (os)")
+			tp.EndRow()
+			continue
+		}
+
 		state := mgr.ReadState(name)
 
 		installed := "-"
