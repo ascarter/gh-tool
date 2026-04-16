@@ -2,7 +2,11 @@ BINARY := gh-tool
 VERSION ?= $(shell git describe --tags --always --dirty)
 LDFLAGS := -ldflags "-s -w -X github.com/ascarter/gh-tool/cmd.version=$(VERSION)"
 
-.PHONY: build test vet clean release
+# Resolve the latest stable semver tag (vMAJOR.MINOR.PATCH)
+LATEST_TAG := $(shell git tag -l 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$$' | head -1)
+LATEST_TAG := $(or $(LATEST_TAG),v0.0.0)
+
+.PHONY: build test vet clean release release-patch release-minor release-major
 
 build:
 	go build $(LDFLAGS) -o $(BINARY) .
@@ -17,6 +21,38 @@ clean:
 	rm -f $(BINARY)
 	go clean -cache -testcache
 
-release:
-	@if [ -z "$(TAG)" ]; then echo "usage: make release TAG=v0.1.0"; exit 1; fi
-	gh release create $(TAG) --generate-notes
+define check_release_ready
+	@branch=$$(git rev-parse --abbrev-ref HEAD); \
+	if [ "$$branch" != "main" ]; then \
+		echo "error: must be on main branch (currently on $$branch)"; exit 1; \
+	fi
+	@if [ -n "$$(git status --porcelain)" ]; then \
+		echo "error: working tree is not clean"; exit 1; \
+	fi
+	@git fetch origin --quiet; \
+	local_sha=$$(git rev-parse HEAD); \
+	remote_sha=$$(git rev-parse origin/main); \
+	if [ "$$local_sha" != "$$remote_sha" ]; then \
+		echo "error: local main is not in sync with origin/main"; exit 1; \
+	fi
+endef
+
+release: release-patch
+
+release-patch: test vet
+	$(check_release_ready)
+	$(eval NEXT_TAG := $(shell echo $(LATEST_TAG) | awk -F. '{print $$1"."$$2"."$$3+1}'))
+	@echo "releasing $(NEXT_TAG) (was $(LATEST_TAG))"
+	gh release create $(NEXT_TAG) --generate-notes
+
+release-minor: test vet
+	$(check_release_ready)
+	$(eval NEXT_TAG := $(shell echo $(LATEST_TAG) | awk -F. '{print $$1"."$$2+1".0"}'))
+	@echo "releasing $(NEXT_TAG) (was $(LATEST_TAG))"
+	gh release create $(NEXT_TAG) --generate-notes
+
+release-major: test vet
+	$(check_release_ready)
+	$(eval NEXT_TAG := $(shell echo $(LATEST_TAG) | awk -F. '{gsub(/^v/,"",$$1); print "v"$$1+1".0.0"}'))
+	@echo "releasing $(NEXT_TAG) (was $(LATEST_TAG))"
+	gh release create $(NEXT_TAG) --generate-notes
