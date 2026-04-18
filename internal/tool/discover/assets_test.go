@@ -53,6 +53,9 @@ func TestClassify(t *testing.T) {
 		// users targeting 32-bit arm can pick it; the linux_amd64 user
 		// just ignores the bucket.
 		{"fzf-0.71.0-linux_armv5.tar.gz", "linux_arm", "", true},
+		// Bare "386" should map to GOARCH=386 (yq style:
+		// yq_linux_386.tar.gz) rather than defaulting to amd64.
+		{"yq_linux_386.tar.gz", "linux_386", "", true},
 
 		// Should be skipped (not classified as platform)
 		{"bat-v0.24.0.tar.gz", "", "", false},  // source-ish
