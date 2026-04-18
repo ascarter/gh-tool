@@ -138,6 +138,8 @@ var archTokens = []struct {
 	{"arm64", "arm64"},
 	{"armv7", "arm"},
 	{"armv6", "arm"},
+	{"armv5", "arm"},
+	{"armv4", "arm"},
 	{"arm32", "arm"},
 	{"arm", "arm"},
 	{"i686", "386"},
@@ -197,8 +199,15 @@ var unsupportedArchTokens = []string{
 	"riscv", "riscv64", "riscv64gc",
 	"s390", "s390x",
 	"mips", "mips64", "mipsel", "mips64el",
-	"loongarch", "loongarch64",
+	"loongarch", "loongarch64", "loong64",
 	"sparc", "sparc64",
+}
+
+// unsupportedOSTokens are operating systems we don't target by default for
+// CLI tooling. Assets matching any of these are rejected so they don't get
+// misclassified as Linux when no recognized OS token is present.
+var unsupportedOSTokens = []string{
+	"android", "ios", "illumos", "solaris", "plan9", "aix", "dragonfly", "haiku",
 }
 
 // hasUnsupportedArch reports whether any chunk of name contains a substring
@@ -210,6 +219,18 @@ func hasUnsupportedArch(tokenSet map[string]bool) bool {
 			if strings.Contains(chunk, tok) {
 				return true
 			}
+		}
+	}
+	return false
+}
+
+// hasUnsupportedOS reports whether any token in the set matches an OS we
+// don't target. Whole-token match (not substring) so we don't reject e.g.
+// "ios" inside arbitrary chunks.
+func hasUnsupportedOS(tokenSet map[string]bool) bool {
+	for _, tok := range unsupportedOSTokens {
+		if tokenSet[tok] {
+			return true
 		}
 	}
 	return false
@@ -238,6 +259,12 @@ func Classify(name string) (key PlatformKey, variant string, ok bool) {
 	}
 
 	if goos == "" && goarch == "" {
+		return "", "", false
+	}
+	// Reject assets that explicitly target an unsupported OS so the
+	// goos="" → "linux" default below doesn't misclassify e.g. an
+	// android_arm64 asset as linux_arm64.
+	if goos == "" && hasUnsupportedOS(tokenSet) {
 		return "", "", false
 	}
 	// Reject assets that explicitly target an unsupported architecture so

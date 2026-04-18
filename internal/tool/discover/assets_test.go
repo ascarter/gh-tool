@@ -45,6 +45,14 @@ func TestClassify(t *testing.T) {
 		{"uv-riscv64gc-unknown-linux-gnu.tar.gz", "", "", false},
 		{"uv-riscv64gc-unknown-linux-musl.tar.gz", "", "", false},
 		{"uv-s390x-unknown-linux-gnu.tar.gz", "", "", false},
+		// fzf ships loong64 and android variants; they must not be
+		// classified as linux_amd64 / linux_arm64 respectively.
+		{"fzf-0.71.0-linux_loong64.tar.gz", "", "", false},
+		{"fzf-0.71.0-android_arm64.tar.gz", "", "", false},
+		// armv5 IS a valid arm target — bucket it under linux_arm so
+		// users targeting 32-bit arm can pick it; the linux_amd64 user
+		// just ignores the bucket.
+		{"fzf-0.71.0-linux_armv5.tar.gz", "linux_arm", "", true},
 
 		// Should be skipped (not classified as platform)
 		{"bat-v0.24.0.tar.gz", "", "", false},  // source-ish
