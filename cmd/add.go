@@ -34,13 +34,15 @@ the values you want.`,
 }
 
 var (
-	flagAddFile string
-	flagAddTag  string
+	flagAddFile    string
+	flagAddTag     string
+	flagAddNoWrite bool
 )
 
 func init() {
 	addCmd.Flags().StringVarP(&flagAddFile, "file", "f", "", "path to manifest file (default: $XDG_CONFIG_HOME/gh-tool/config.toml)")
 	addCmd.Flags().StringVarP(&flagAddTag, "tag", "t", "", "release tag to inspect (default: latest)")
+	addCmd.Flags().BoolVar(&flagAddNoWrite, "no-write", false, "print the generated [[tool]] block without writing the manifest")
 	rootCmd.AddCommand(addCmd)
 }
 
@@ -64,19 +66,7 @@ or edit your manifest directly.`, args[0])
 	if err != nil {
 		return err
 	}
-	if cfg.FindTool(repo) != nil {
-		var overwrite bool
-		if err := survey.AskOne(&survey.Confirm{
-			Message: fmt.Sprintf("%s is already in %s. Overwrite?", repo, mfPath),
-			Default: false,
-		}, &overwrite); err != nil {
-			return err
-		}
-		if !overwrite {
-			fmt.Println("Aborted.")
-			return nil
-		}
-	}
+	existing := cfg.FindTool(repo) != nil
 
 	fmt.Printf("Fetching release for %s...\n", repo)
 	rel, err := discover.FetchRelease(repo, flagAddTag)
@@ -163,12 +153,19 @@ or edit your manifest directly.`, args[0])
 
 	previewAddEntry(t)
 
+	if flagAddNoWrite {
+		fmt.Println("--no-write set; manifest unchanged.")
+		return nil
+	}
+
 	prompt := "Save?"
-	if !hostSupported {
-		prompt = "Save? (install will be skipped on this host)"
+	defaultYes := true
+	if existing {
+		prompt = fmt.Sprintf("Overwrite existing entry for %s in %s?", repo, mfPath)
+		defaultYes = false
 	}
 	var ok bool
-	if err := survey.AskOne(&survey.Confirm{Message: prompt, Default: true}, &ok); err != nil {
+	if err := survey.AskOne(&survey.Confirm{Message: prompt, Default: defaultYes}, &ok); err != nil {
 		return err
 	}
 	if !ok {
@@ -180,7 +177,11 @@ or edit your manifest directly.`, args[0])
 	if err := config.Save(mfPath, cfg); err != nil {
 		return fmt.Errorf("saving manifest: %w", err)
 	}
-	fmt.Printf("✓ Saved %s to %s\n", repo, mfPath)
+	if existing {
+		fmt.Printf("✓ Updated %s in %s\n", repo, mfPath)
+	} else {
+		fmt.Printf("✓ Saved %s to %s\n", repo, mfPath)
+	}
 	fmt.Printf("Run: gh tool install %s\n", repo)
 	return nil
 }

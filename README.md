@@ -228,7 +228,7 @@ gh tool shell <bash|zsh>        Print shell integration config
 gh tool version                 Print version
 ```
 
-`add` flags: `--file/-f`, `--tag/-t`.
+`add` flags: `--file/-f`, `--tag/-t`, `--no-write` (preview the generated block without saving).
 `install` flags: `--pattern/-p`, `--tag/-t`, `--bin`, `--man`, `--completion`, `--no-verify`, `--force`, `--file/-f`.
 
 ### List status values
