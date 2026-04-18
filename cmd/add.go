@@ -338,10 +338,12 @@ func chooseAddBins(layout *discover.Layout, repo, inspectAssetName, foldedPatter
 			source = stripArchiveExt(foldedPattern)
 		}
 
-		// Offer to rename if the source basename doesn't already match the
-		// tool name. Bare-binary assets almost always need a rename.
+		// Offer to rename only when there's a single binary and its
+		// basename doesn't match the tool name. Multi-binary releases
+		// (e.g. astral-sh/uv ships uv + uvx) should keep their original
+		// names.
 		linkName := source
-		if !strings.EqualFold(filepath.Base(source), name) {
+		if len(picked) == 1 && !strings.EqualFold(filepath.Base(source), name) {
 			var rename bool
 			if err := survey.AskOne(&survey.Confirm{
 				Message: fmt.Sprintf("Rename symlink %q to %q?", filepath.Base(source), name),
