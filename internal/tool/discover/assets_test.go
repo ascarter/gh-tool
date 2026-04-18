@@ -31,13 +31,16 @@ func TestClassify(t *testing.T) {
 		{"jq-linux-amd64", "linux_amd64", "", true},
 		{"jq-windows-amd64.exe", "windows_amd64", "", true},
 
-		// OS-only or arch-only assets (fnm style) — defaults applied:
-		// OS-only assumes amd64; arch-only assumes linux.
-		{"fnm-linux.zip", "linux_amd64", "", true},
-		{"fnm-macos.zip", "darwin_amd64", "", true},
-		{"fnm-windows.zip", "windows_amd64", "", true},
-		{"fnm-arm64.zip", "linux_arm64", "", true},
-		{"fnm-arm32.zip", "linux_arm", "", true},
+		// OS-only or arch-only assets in isolation must NOT classify by
+		// themselves anymore — defaulting now lives in classifyAssets,
+		// which only fires when no sibling asset explicitly covers the
+		// same OS or arch. See TestClassifyAssetsTwoPass for batched
+		// behavior.
+		{"fnm-linux.zip", "", "", false},
+		{"fnm-macos.zip", "", "", false},
+		{"fnm-windows.zip", "", "", false},
+		{"fnm-arm64.zip", "", "", false},
+		{"fnm-arm32.zip", "", "", false},
 
 		// Unsupported architectures must NOT fall back to the OS-only
 		// amd64 default (uv ships powerpc/riscv/s390x variants).
@@ -129,4 +132,63 @@ out = preferArchives(in)
 if len(out) != 1 {
 t.Errorf("preferArchives dropped lone bare binary: %+v", out)
 }
+}
+
+func TestClassifyAssetsTwoPass(t *testing.T) {
+t.Run("fnm: defaults applied because no sibling has explicit arch", func(t *testing.T) {
+in := []Asset{
+{Name: "fnm-linux.zip"},
+{Name: "fnm-macos.zip"},
+{Name: "fnm-windows.zip"},
+{Name: "fnm-arm64.zip"},
+{Name: "fnm-arm32.zip"},
+}
+got, _ := classifyAssets(in)
+want := map[string]PlatformKey{
+"fnm-linux.zip":   "linux_amd64",
+"fnm-macos.zip":   "darwin_amd64",
+"fnm-windows.zip": "windows_amd64",
+"fnm-arm64.zip":   "linux_arm64",
+"fnm-arm32.zip":   "linux_arm",
+}
+if len(got) != len(want) {
+t.Fatalf("classified %d, want %d: %+v", len(got), len(want), got)
+}
+for _, a := range got {
+if a.Platform != want[a.Name] {
+t.Errorf("%s -> %q, want %q", a.Name, a.Platform, want[a.Name])
+}
+}
+})
+
+t.Run("yq: partial assets dropped because explicit siblings exist", func(t *testing.T) {
+// yq_linux_386.tar.gz has no recognized arch token but a real
+// yq_linux_amd64.tar.gz also exists — the partial must be
+// skipped so it doesn't pollute linux_amd64.
+in := []Asset{
+{Name: "yq_linux_amd64.tar.gz"},
+{Name: "yq_linux_arm64.tar.gz"},
+{Name: "yq_linux_386.tar.gz"}, // wait — 386 IS in archTokens
+{Name: "yq_linux_someunknownarch.tar.gz"},
+}
+got, skipped := classifyAssets(in)
+var seenStray bool
+for _, a := range got {
+if a.Name == "yq_linux_someunknownarch.tar.gz" {
+seenStray = true
+}
+}
+if seenStray {
+t.Errorf("partial asset with unknown arch was not skipped; got=%+v", got)
+}
+var skippedStray bool
+for _, a := range skipped {
+if a.Name == "yq_linux_someunknownarch.tar.gz" {
+skippedStray = true
+}
+}
+if !skippedStray {
+t.Errorf("expected yq_linux_someunknownarch.tar.gz in skipped, got %+v", skipped)
+}
+})
 }

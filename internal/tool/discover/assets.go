@@ -79,20 +79,11 @@ func FetchRelease(repo, tag string) (*Release, error) {
 		Tag:        raw.TagName,
 		ByPlatform: map[PlatformKey][]Asset{},
 	}
-	for _, a := range raw.Assets {
-		if isSkippable(a.Name) {
-			rel.Skipped = append(rel.Skipped, a)
-			continue
-		}
-		key, variant, ok := Classify(a.Name)
-		if !ok {
-			rel.Skipped = append(rel.Skipped, a)
-			continue
-		}
-		a.Platform = key
-		a.Variant = variant
+	classified, skipped := classifyAssets(raw.Assets)
+	rel.Skipped = skipped
+	for _, a := range classified {
 		rel.All = append(rel.All, a)
-		rel.ByPlatform[key] = append(rel.ByPlatform[key], a)
+		rel.ByPlatform[a.Platform] = append(rel.ByPlatform[a.Platform], a)
 	}
 	// Drop bare-binary assets that duplicate an archived sibling with the
 	// same base name (e.g. yq ships both yq_linux_amd64 and
@@ -103,6 +94,67 @@ func FetchRelease(repo, tag string) (*Release, error) {
 		rel.ByPlatform[k] = preferArchives(list)
 	}
 	return rel, nil
+}
+
+// classifyAssets buckets a release's assets via two-pass classification:
+//
+//  1. Pure detection runs per asset; fully-specified assets land in the
+//     classified set immediately and contribute to the OS/arch coverage maps.
+//  2. Partial assets (one of goos/goarch missing) are promoted via the
+//     fnm-style default ONLY when no sibling asset already covers that
+//     OS/arch explicitly. Otherwise they are skipped — this keeps yq-style
+//     unrecognized arch assets out of the linux_amd64 bucket.
+func classifyAssets(in []Asset) (classified, skipped []Asset) {
+	type partial struct {
+		asset   Asset
+		goos    string
+		goarch  string
+		variant string
+	}
+	var partials []partial
+	osesWithExplicitArch := map[string]bool{}
+	archesWithExplicitOS := map[string]bool{}
+	for _, a := range in {
+		if isSkippable(a.Name) {
+			skipped = append(skipped, a)
+			continue
+		}
+		goos, goarch, variant, ok := detectTokens(a.Name)
+		if !ok {
+			skipped = append(skipped, a)
+			continue
+		}
+		if goos != "" && goarch != "" {
+			a.Platform = PlatformKey(goos + "_" + goarch)
+			a.Variant = variant
+			classified = append(classified, a)
+			osesWithExplicitArch[goos] = true
+			archesWithExplicitOS[goarch] = true
+			continue
+		}
+		partials = append(partials, partial{asset: a, goos: goos, goarch: goarch, variant: variant})
+	}
+	for _, p := range partials {
+		goos, goarch := p.goos, p.goarch
+		if goos == "" {
+			if archesWithExplicitOS[goarch] {
+				skipped = append(skipped, p.asset)
+				continue
+			}
+			goos = "linux"
+		}
+		if goarch == "" {
+			if osesWithExplicitArch[goos] {
+				skipped = append(skipped, p.asset)
+				continue
+			}
+			goarch = "amd64"
+		}
+		p.asset.Platform = PlatformKey(goos + "_" + goarch)
+		p.asset.Variant = p.variant
+		classified = append(classified, p.asset)
+	}
+	return classified, skipped
 }
 
 // preferArchives drops bare-binary assets when an archived sibling with
@@ -288,14 +340,27 @@ func hasUnsupportedOS(tokenSet map[string]bool) bool {
 }
 
 // Classify maps an asset filename to a (PlatformKey, variant). Returns ok=false
-// when the asset can't be assigned to a platform (e.g., source bundles, docs).
+// when the asset can't be assigned to a platform on its own.
+//
+// This is a pure detection step: it does NOT default a missing goos or
+// goarch. classifyAssets applies conditional defaults in a second pass so
+// fnm-style OS-only releases work without misclassifying yq-style assets
+// whose arch token we don't recognize.
 func Classify(name string) (key PlatformKey, variant string, ok bool) {
+	goos, goarch, variant, ok := detectTokens(name)
+	if !ok || goos == "" || goarch == "" {
+		return "", "", false
+	}
+	return PlatformKey(goos + "_" + goarch), variant, true
+}
+
+// detectTokens runs token detection without applying conventional defaults.
+// Returns ok=false only when the asset has no recognizable tokens at all
+// or matches an unsupported OS/arch.
+func detectTokens(name string) (goos, goarch, variant string, ok bool) {
 	lower := strings.ToLower(name)
 	tokenSet := tokenize(lower)
 
-	var goos, goarch string
-	// Iterate in declaration order so longer/more specific tokens win
-	// (e.g. x86_64 before x86, macos before any "mac" prefix).
 	for _, at := range archTokens {
 		if tokenSet[at.token] {
 			goarch = at.goarch
@@ -310,27 +375,13 @@ func Classify(name string) (key PlatformKey, variant string, ok bool) {
 	}
 
 	if goos == "" && goarch == "" {
-		return "", "", false
+		return "", "", "", false
 	}
-	// Reject assets that explicitly target an unsupported OS so the
-	// goos="" → "linux" default below doesn't misclassify e.g. an
-	// android_arm64 asset as linux_arm64.
 	if goos == "" && hasUnsupportedOS(tokenSet) {
-		return "", "", false
+		return "", "", "", false
 	}
-	// Reject assets that explicitly target an unsupported architecture so
-	// the OS-only default below doesn't misclassify them as amd64.
 	if goarch == "" && hasUnsupportedArch(tokenSet) {
-		return "", "", false
-	}
-	// Apply conventional defaults for projects that ship per-OS or per-arch
-	// assets only: OS-only means amd64; arch-only means linux. This matches
-	// common naming (e.g. fnm-linux.zip, fnm-arm64.zip).
-	if goarch == "" {
-		goarch = "amd64"
-	}
-	if goos == "" {
-		goos = "linux"
+		return "", "", "", false
 	}
 
 	for _, v := range variantTokens {
@@ -340,7 +391,7 @@ func Classify(name string) (key PlatformKey, variant string, ok bool) {
 		}
 	}
 
-	return PlatformKey(goos + "_" + goarch), variant, true
+	return goos, goarch, variant, true
 }
 
 // tokenize splits an asset filename into a set of lowercase tokens. Each
