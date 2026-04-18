@@ -14,7 +14,6 @@ import (
 	"golang.org/x/term"
 
 	"github.com/ascarter/gh-tool/internal/config"
-	"github.com/ascarter/gh-tool/internal/tool"
 	"github.com/ascarter/gh-tool/internal/tool/discover"
 )
 
@@ -22,10 +21,12 @@ var addCmd = &cobra.Command{
 	Use:   "add <owner/repo>",
 	Short: "Add a tool to the manifest interactively",
 	Long: `Discover a release on GitHub, choose its assets and binary layout
-interactively, write the resulting [[tool]] block into the manifest, and
-install the tool on this machine.
+interactively, then write the resulting [[tool]] block into the manifest.
 
 Use this when you want to add a new tool without hand-editing the manifest.
+The entry is not installed automatically — run "gh tool install <repo>"
+afterwards.
+
 For non-interactive use, run "gh tool install <repo> --pattern ..." with
 the values you want.`,
 	Args: cobra.ExactArgs(1),
@@ -57,7 +58,6 @@ or edit your manifest directly.`, args[0])
 	}
 
 	dirs := resolveDirs()
-	mgr := tool.NewManager(dirs)
 	mfPath := manifestPath(dirs)
 
 	cfg, err := config.Load(mfPath)
@@ -181,14 +181,8 @@ or edit your manifest directly.`, args[0])
 		return fmt.Errorf("saving manifest: %w", err)
 	}
 	fmt.Printf("✓ Saved %s to %s\n", repo, mfPath)
-
-	if !hostSupported {
-		fmt.Printf("Skipping install: %s/%s is not in the selected platforms.\n", runtime.GOOS, runtime.GOARCH)
-		return nil
-	}
-
-	// Reuse the inspection-time download for the install.
-	return mgr.InstallFromAsset(t, assetPath, rel.Tag, true)
+	fmt.Printf("Run: gh tool install %s\n", repo)
+	return nil
 }
 
 func chooseAddPlatforms(platforms []discover.PlatformKey) ([]discover.PlatformKey, error) {

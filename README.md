@@ -119,11 +119,14 @@ This does not modify the manifest — the install only shows up in `gh tool list
 
 ### Adding a tool interactively
 
-`gh tool add` walks you from `owner/repo` to a working manifest entry without hand-editing TOML. It fetches the latest release, lets you pick the platforms and asset variants you want, folds them into a templated `pattern`, inspects the archive for the binary/man/completion paths, then writes the entry and installs it on the host:
+`gh tool add` walks you from `owner/repo` to a working manifest entry without hand-editing TOML. It fetches the latest release, lets you pick the platforms and asset variants you want, folds them into a templated `pattern`, inspects the archive for the binary/man/completion paths, then writes the entry to the manifest:
 
 ```sh
 gh tool add sharkdp/bat
+gh tool install sharkdp/bat
 ```
+
+`add` only writes the manifest — run `gh tool install <repo>` afterwards to actually install. This keeps authoring and installation as separate, composable steps.
 
 Steps with a single obvious answer are auto-skipped (e.g., one platform, one matching executable, no completions found).
 
@@ -214,7 +217,7 @@ Values are Go-style OS names: `darwin`, `linux`, `windows`. If `os` is omitted, 
 ## Commands
 
 ```
-gh tool add <owner/repo>        Interactively author a manifest entry and install
+gh tool add <owner/repo>        Interactively author a manifest entry (does not install)
 gh tool install [owner/repo]    Reconcile from manifest, or install a single tool
 gh tool remove <owner/repo>     Remove an installed tool (manifest is not modified)
 gh tool list                    List installed tools and any drift from the manifest
