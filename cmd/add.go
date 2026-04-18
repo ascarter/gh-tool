@@ -129,7 +129,7 @@ or edit your manifest directly.`, args[0])
 		return err
 	}
 
-	bins, err := chooseAddBins(layout, repo)
+	bins, err := chooseAddBins(layout, repo, inspectAssetName, fold.Pattern)
 	if err != nil {
 		return err
 	}
@@ -161,7 +161,7 @@ or edit your manifest directly.`, args[0])
 	prompt := "Save?"
 	defaultYes := true
 	if existing {
-		prompt = fmt.Sprintf("Overwrite existing entry for %s in %s?", repo, mfPath)
+		prompt = "Overwrite existing entry?"
 		defaultYes = false
 	}
 	var ok bool
@@ -286,39 +286,92 @@ func confirmAddPattern(fold *discover.FoldResult, tag string, chosen map[discove
 	return nil
 }
 
-func chooseAddBins(layout *discover.Layout, repo string) ([]string, error) {
+// chooseAddBins prompts the user to pick which executables from the inspected
+// archive should be symlinked. It also handles two refinements:
+//
+//   - bare-binary assets (e.g. jqlang/jq ships "jq-macos-arm64" as the asset
+//     itself, not an archive). In that case the chosen bin's path equals the
+//     inspected asset name, and we rewrite the source side to use the folded
+//     pattern so it works across platforms.
+//
+//   - rename: if the resulting bin name does not match the repo name, offer
+//     to rename it (writing "source:reponame" in the manifest).
+func chooseAddBins(layout *discover.Layout, repo, inspectAssetName, foldedPattern string) ([]string, error) {
 	_, name := splitRepoForAdd(repo)
 	if len(layout.Executables) == 0 {
 		fmt.Println("· No executables detected in archive; you may need to set --bin manually later.")
 		return nil, nil
 	}
+
+	var picked []string
 	if match := layout.MatchBinName(name); match != "" && len(layout.Executables) == 1 {
 		fmt.Printf("· Auto-detected bin: %s\n", match)
-		// Use just the basename so cross-platform .exe etc. resolve via findFileInDir.
-		return []string{strings.TrimSuffix(filepath.Base(match), ".exe")}, nil
-	}
-	options := make([]string, len(layout.Executables))
-	defaults := []string{}
-	for i, e := range layout.Executables {
-		options[i] = e
-		base := strings.TrimSuffix(strings.ToLower(filepath.Base(e)), ".exe")
-		if base == strings.ToLower(name) {
-			defaults = append(defaults, e)
+		picked = []string{match}
+	} else {
+		options := make([]string, len(layout.Executables))
+		defaults := []string{}
+		for i, e := range layout.Executables {
+			options[i] = e
+			base := strings.TrimSuffix(strings.ToLower(filepath.Base(e)), ".exe")
+			if base == strings.ToLower(name) {
+				defaults = append(defaults, e)
+			}
+		}
+		if err := survey.AskOne(&survey.MultiSelect{
+			Message: "Select binaries to symlink:",
+			Options: options,
+			Default: defaults,
+		}, &picked); err != nil {
+			return nil, err
 		}
 	}
-	var picked []string
-	if err := survey.AskOne(&survey.MultiSelect{
-		Message: "Select binaries to symlink:",
-		Options: options,
-		Default: defaults,
-	}, &picked); err != nil {
-		return nil, err
-	}
+
 	out := make([]string, 0, len(picked))
 	for _, p := range picked {
-		out = append(out, strings.TrimSuffix(filepath.Base(p), ".exe"))
+		source := strings.TrimSuffix(filepath.Base(p), ".exe")
+		bareBinary := source == strings.TrimSuffix(inspectAssetName, ".exe")
+		// Bare-binary case: the asset IS the executable. Use the folded
+		// pattern (with extension stripped) as the source so per-platform
+		// binaries resolve correctly. Skip when the fold produced a
+		// per-platform map — there is no single template to embed.
+		if bareBinary && foldedPattern != "" {
+			source = stripArchiveExt(foldedPattern)
+		}
+
+		// Offer to rename if the source basename doesn't already match the
+		// tool name. Bare-binary assets almost always need a rename.
+		linkName := source
+		if !strings.EqualFold(filepath.Base(source), name) {
+			var rename bool
+			if err := survey.AskOne(&survey.Confirm{
+				Message: fmt.Sprintf("Rename symlink %q to %q?", filepath.Base(source), name),
+				Default: true,
+			}, &rename); err != nil {
+				return nil, err
+			}
+			if rename {
+				linkName = name
+			}
+		}
+
+		if linkName == source {
+			out = append(out, source)
+		} else {
+			out = append(out, source+":"+linkName)
+		}
 	}
 	return out, nil
+}
+
+// stripArchiveExt removes a single trailing archive extension from s. Used to
+// derive a bare-binary name from a folded archive pattern.
+func stripArchiveExt(s string) string {
+	for _, ext := range []string{".tar.gz", ".tar.xz", ".tar.bz2", ".tgz", ".txz", ".zip", ".gz", ".xz", ".exe"} {
+		if strings.HasSuffix(strings.ToLower(s), ext) {
+			return s[:len(s)-len(ext)]
+		}
+	}
+	return s
 }
 
 func chooseAddPaths(label string, found []string) ([]string, error) {
