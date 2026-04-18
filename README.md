@@ -48,6 +48,9 @@ eval "$(gh tool shell bash)"
 
 # zsh (~/.zshrc)
 eval "$(gh tool shell zsh)"
+
+# fish (~/.config/fish/config.fish)
+gh tool shell fish | source
 ```
 
 ## Manifest
@@ -226,7 +229,7 @@ gh tool list                    List installed tools and any drift from the mani
 gh tool upgrade [owner/repo]    Upgrade to latest release (state-driven)
 gh tool cache list              Show cached downloads
 gh tool cache clean [tool]      Remove cached downloads
-gh tool shell <bash|zsh>        Print shell integration config
+gh tool shell <bash|zsh|fish>   Print shell integration config
 gh tool version                 Print version
 ```
 

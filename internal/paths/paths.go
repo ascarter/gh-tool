@@ -47,6 +47,16 @@ func (d Dirs) BashCompletionDir() string {
 	return filepath.Join(d.Data, "share", "completions", "bash")
 }
 
+// FishCompletionDir returns the path for fish completion symlinks.
+func (d Dirs) FishCompletionDir() string {
+	return filepath.Join(d.Data, "share", "completions", "fish")
+}
+
+// PwshCompletionDir returns the path for PowerShell completion symlinks.
+func (d Dirs) PwshCompletionDir() string {
+	return filepath.Join(d.Data, "share", "completions", "pwsh")
+}
+
 // ToolsDir returns the base path where tool payloads are unpacked.
 func (d Dirs) ToolsDir() string {
 	return filepath.Join(d.Data, "tools")

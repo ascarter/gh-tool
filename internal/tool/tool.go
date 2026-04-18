@@ -283,7 +283,11 @@ func (m *Manager) createSymlinks(t config.Tool, tag, toolDir string) error {
 		_ = forceSymlink(src, dst)
 	}
 
-	// Completion symlinks
+	// Completion symlinks. Route by extension/prefix:
+	//   *.fish      → fish completions dir
+	//   *.ps1       → PowerShell completions dir
+	//   _<name>     → zsh completions dir
+	//   everything else (incl. *.bash) → bash completions dir
 	for _, comp := range t.Completions {
 		src := findFileInDir(toolDir, comp)
 		if src == "" {
@@ -291,14 +295,19 @@ func (m *Manager) createSymlinks(t config.Tool, tag, toolDir string) error {
 			continue
 		}
 		base := filepath.Base(comp)
-		// Zsh completions typically start with _
-		if strings.HasPrefix(base, "_") {
-			dst := filepath.Join(m.Dirs.ZshCompletionDir(), base)
-			_ = forceSymlink(src, dst)
-		} else {
-			dst := filepath.Join(m.Dirs.BashCompletionDir(), base)
-			_ = forceSymlink(src, dst)
+		low := strings.ToLower(base)
+		var dst string
+		switch {
+		case strings.HasSuffix(low, ".fish"):
+			dst = filepath.Join(m.Dirs.FishCompletionDir(), base)
+		case strings.HasSuffix(low, ".ps1"):
+			dst = filepath.Join(m.Dirs.PwshCompletionDir(), base)
+		case strings.HasPrefix(base, "_"):
+			dst = filepath.Join(m.Dirs.ZshCompletionDir(), base)
+		default:
+			dst = filepath.Join(m.Dirs.BashCompletionDir(), base)
 		}
+		_ = forceSymlink(src, dst)
 	}
 
 	return nil
@@ -311,6 +320,8 @@ func (m *Manager) removeToolSymlinks(name string) {
 		m.Dirs.ManDir(),
 		m.Dirs.ZshCompletionDir(),
 		m.Dirs.BashCompletionDir(),
+		m.Dirs.FishCompletionDir(),
+		m.Dirs.PwshCompletionDir(),
 	}
 	for _, dir := range dirs {
 		entries, err := os.ReadDir(dir)

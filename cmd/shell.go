@@ -7,13 +7,14 @@ import (
 )
 
 var shellCmd = &cobra.Command{
-	Use:   "shell <bash|zsh>",
+	Use:   "shell <bash|zsh|fish>",
 	Short: "Generate shell integration config",
 	Long: `Generate shell configuration for PATH, MANPATH, and completions.
 
 Add to your shell profile:
   eval "$(gh tool shell bash)"
-  eval "$(gh tool shell zsh)"`,
+  eval "$(gh tool shell zsh)"
+  gh tool shell fish | source`,
 	Args: cobra.ExactArgs(1),
 	RunE: runShell,
 }
@@ -49,8 +50,21 @@ export MANPATH="%s:$MANPATH"
 fpath=(%s $fpath)
 `, dirs.BinDir(), dirs.ManDir(), dirs.ZshCompletionDir())
 
+	case "fish":
+		fmt.Printf(`# gh-tool shell integration (fish)
+fish_add_path -g %s
+set -gx MANPATH %s $MANPATH
+
+# fish completions
+if test -d %s
+    for f in %s/*.fish
+        source $f
+    end
+end
+`, dirs.BinDir(), dirs.ManDir(), dirs.FishCompletionDir(), dirs.FishCompletionDir())
+
 	default:
-		return fmt.Errorf("unsupported shell: %s (use bash or zsh)", shell)
+		return fmt.Errorf("unsupported shell: %s (use bash, zsh, or fish)", shell)
 	}
 
 	return nil
