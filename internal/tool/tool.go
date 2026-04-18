@@ -445,12 +445,13 @@ func verifyAttestation(repo, assetPath string) {
 // package when reverse-folding asset names into patterns.
 func Tokens(goos, goarch, tag string) map[string]string {
 	return map[string]string{
-		"{{os}}":       normalizeOS(goos),
-		"{{arch}}":     normalizeArch(goarch),
-		"{{triple}}":   platformTriple(goos, goarch),
-		"{{platform}}": platformName(goos),
-		"{{gnuarch}}":  gnuArch(goarch),
-		"{{tag}}":      tag,
+		"{{os}}":         normalizeOS(goos),
+		"{{arch}}":       normalizeArch(goarch),
+		"{{triple}}":     platformTriple(goos, goarch),
+		"{{musltriple}}": platformMuslTriple(goos, goarch),
+		"{{platform}}":   platformName(goos),
+		"{{gnuarch}}":    gnuArch(goarch),
+		"{{tag}}":        tag,
 	}
 }
 
@@ -467,12 +468,13 @@ func ExpandPatternFor(pattern, tag, goos, goarch string) string {
 //
 // Supported variables:
 //
-//	{{os}}       — Go-style OS name: darwin, linux, windows
-//	{{arch}}     — Go-style arch: arm64, amd64, i386
-//	{{triple}}   — Rust target triple: aarch64-apple-darwin, x86_64-unknown-linux-gnu, …
-//	{{platform}} — User-facing OS name: macos, linux, windows
-//	{{gnuarch}}  — GNU/Rust-style arch: aarch64, x86_64, i686
-//	{{tag}}      — release tag, e.g. v1.2.3 (empty if not yet resolved)
+//	{{os}}         — Go-style OS name: darwin, linux, windows
+//	{{arch}}       — Go-style arch: arm64, amd64, i386
+//	{{triple}}     — Rust target triple (Tier 1 Linux uses gnu)
+//	{{musltriple}} — Rust target triple, Linux uses musl libc
+//	{{platform}}   — User-facing OS name: macos, linux, windows
+//	{{gnuarch}}    — GNU/Rust-style arch: aarch64, x86_64, i686
+//	{{tag}}        — release tag, e.g. v1.2.3 (empty if not yet resolved)
 func ExpandPattern(pattern, tag string) string {
 	return ExpandPatternFor(pattern, tag, runtime.GOOS, runtime.GOARCH)
 }
@@ -544,6 +546,16 @@ func platformTriple(goos, goarch string) string {
 	default:
 		return arch + "-" + goos
 	}
+}
+
+// platformMuslTriple is like platformTriple but uses musl as the libc on
+// Linux. Many Rust CLIs (uv, ruff, just, watchexec, …) ship statically
+// linked musl artifacts as their preferred Linux distribution.
+func platformMuslTriple(goos, goarch string) string {
+	if goos == "linux" {
+		return gnuArch(goarch) + "-unknown-linux-musl"
+	}
+	return platformTriple(goos, goarch)
 }
 
 // parseBinSpec parses a bin entry which may be "name" or "source:link".

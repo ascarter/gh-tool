@@ -153,17 +153,19 @@ The command requires an interactive terminal. For non-interactive workflows, use
 
 Patterns support template variables that expand to platform-specific values at runtime:
 
-| Variable       | Description                   | macOS ARM64              | Linux x86_64                     |
-|----------------|-------------------------------|--------------------------|----------------------------------|
-| `{{os}}`       | Go-style OS name              | `darwin`                 | `linux`                          |
-| `{{arch}}`     | Go-style architecture         | `arm64`                  | `amd64`                          |
-| `{{triple}}`   | Rust target triple            | `aarch64-apple-darwin`   | `x86_64-unknown-linux-gnu`       |
-| `{{platform}}` | User-facing OS name           | `macos`                  | `linux`                          |
-| `{{gnuarch}}`  | GNU/Rust-style architecture   | `aarch64`                | `x86_64`                         |
-| `{{tag}}`      | Resolved release tag          | `v0.24.0`                | `v0.24.0`                        |
+| Variable         | Description                          | macOS ARM64              | Linux x86_64                     |
+|------------------|--------------------------------------|--------------------------|----------------------------------|
+| `{{os}}`         | Go-style OS name                     | `darwin`                 | `linux`                          |
+| `{{arch}}`       | Go-style architecture                | `arm64`                  | `amd64`                          |
+| `{{triple}}`     | Rust target triple (Linux=gnu)       | `aarch64-apple-darwin`   | `x86_64-unknown-linux-gnu`       |
+| `{{musltriple}}` | Rust target triple (Linux=musl)      | `aarch64-apple-darwin`   | `x86_64-unknown-linux-musl`      |
+| `{{platform}}`   | User-facing OS name                  | `macos`                  | `linux`                          |
+| `{{gnuarch}}`    | GNU/Rust-style architecture          | `aarch64`                | `x86_64`                         |
+| `{{tag}}`        | Resolved release tag                 | `v0.24.0`                | `v0.24.0`                        |
 
 Use `{{os}}` / `{{arch}}` for Go-style release naming (e.g., `fzf-*-{{os}}_{{arch}}.tar.gz`).
-Use `{{triple}}` for Rust-style naming (e.g., `ripgrep-*-{{triple}}.tar.gz`).
+Use `{{triple}}` for Rust-style naming on glibc Linux (e.g., `ripgrep-*-{{triple}}.tar.gz`).
+Use `{{musltriple}}` for Rust tools that ship statically-linked musl Linux binaries (e.g., `uv-{{musltriple}}.tar.gz`).
 Use `{{platform}}` / `{{gnuarch}}` for projects that use `macos` or `aarch64` in asset names.
 
 ### Per-Platform Patterns

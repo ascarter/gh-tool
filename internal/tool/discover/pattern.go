@@ -79,8 +79,10 @@ func candidateTemplates(asset, tag string, key PlatformKey) []string {
 		subs [][2]string // [token-name, literal-value] in substitution order
 	}
 	strategies := []strategy{
-		// Most specific: the full Rust triple.
+		// Most specific: the full Rust triple (Linux=gnu).
 		{subs: [][2]string{{"{{triple}}", tokens["{{triple}}"]}}},
+		// Rust triple with Linux=musl (uv, ruff, watchexec, …).
+		{subs: [][2]string{{"{{musltriple}}", tokens["{{musltriple}}"]}}},
 		// Platform name + GNU arch (handles e.g. "macos_x86_64", "linux_aarch64").
 		{subs: [][2]string{
 			{"{{platform}}", tokens["{{platform}}"]},

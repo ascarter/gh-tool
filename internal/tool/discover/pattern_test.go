@@ -97,3 +97,27 @@ func TestFoldSinglePlatform(t *testing.T) {
 		t.Errorf("Fold(single) = %+v, expected a pattern", got)
 	}
 }
+
+func TestFoldMuslTriple(t *testing.T) {
+	// uv-style: musl on Linux, apple-darwin on macOS — folds to {{musltriple}}.
+	got := Fold("0.11.7", map[PlatformKey]string{
+		"darwin_amd64": "uv-x86_64-apple-darwin.tar.gz",
+		"darwin_arm64": "uv-aarch64-apple-darwin.tar.gz",
+		"linux_amd64":  "uv-x86_64-unknown-linux-musl.tar.gz",
+		"linux_arm64":  "uv-aarch64-unknown-linux-musl.tar.gz",
+	})
+	if got.Pattern != "uv-{{musltriple}}.tar.gz" {
+		t.Errorf("Fold pattern = %q, want %q (got=%+v)", got.Pattern, "uv-{{musltriple}}.tar.gz", got)
+	}
+}
+
+func TestFoldGnuTriplePreferredOverMusl(t *testing.T) {
+	// All-gnu Linux + darwin should fold to {{triple}}, not {{musltriple}}.
+	got := Fold("v0.24.0", map[PlatformKey]string{
+		"darwin_amd64": "bat-v0.24.0-x86_64-apple-darwin.tar.gz",
+		"linux_amd64":  "bat-v0.24.0-x86_64-unknown-linux-gnu.tar.gz",
+	})
+	if got.Pattern != "bat-{{tag}}-{{triple}}.tar.gz" {
+		t.Errorf("Fold pattern = %q, want %q", got.Pattern, "bat-{{tag}}-{{triple}}.tar.gz")
+	}
+}
