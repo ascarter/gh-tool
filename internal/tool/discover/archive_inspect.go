@@ -123,17 +123,23 @@ func isTopOrSingleNested(rel string) bool {
 
 func isManPage(rel string) bool {
 	low := strings.ToLower(rel)
-	if strings.Contains(low, "/man/man") || strings.HasPrefix(low, "man/man") {
-		return true
-	}
 	if !manPageRE.MatchString(low) {
 		return false
+	}
+	if strings.Contains(low, "/man/man") || strings.HasPrefix(low, "man/man") {
+		return true
 	}
 	// .1-.9 suffix in any of the conventional doc dirs.
 	for _, dir := range []string{"man/", "doc/", "docs/", "share/man/"} {
 		if strings.HasPrefix(low, dir) || strings.Contains(low, "/"+dir) {
 			return true
 		}
+	}
+	// Bare *.N file at archive root (e.g. sharkdp/fd ships fd.1 alongside
+	// the binary). Only accept when there's no directory component, so we
+	// don't pick up arbitrary numeric-suffixed files buried in subdirs.
+	if !strings.Contains(rel, "/") {
+		return true
 	}
 	return false
 }
