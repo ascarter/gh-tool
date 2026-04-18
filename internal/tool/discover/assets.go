@@ -138,6 +138,8 @@ var archTokens = []struct {
 	{"arm64", "arm64"},
 	{"armv7", "arm"},
 	{"armv6", "arm"},
+	{"arm32", "arm"},
+	{"arm", "arm"},
 	{"i686", "386"},
 	{"i386", "386"},
 	{"x86", "386"},
@@ -209,8 +211,17 @@ func Classify(name string) (key PlatformKey, variant string, ok bool) {
 		}
 	}
 
-	if goos == "" || goarch == "" {
+	if goos == "" && goarch == "" {
 		return "", "", false
+	}
+	// Apply conventional defaults for projects that ship per-OS or per-arch
+	// assets only: OS-only means amd64; arch-only means linux. This matches
+	// common naming (e.g. fnm-linux.zip, fnm-arm64.zip).
+	if goarch == "" {
+		goarch = "amd64"
+	}
+	if goos == "" {
+		goos = "linux"
 	}
 
 	for _, v := range variantTokens {

@@ -31,6 +31,14 @@ func TestClassify(t *testing.T) {
 		{"jq-linux-amd64", "linux_amd64", "", true},
 		{"jq-windows-amd64.exe", "windows_amd64", "", true},
 
+		// OS-only or arch-only assets (fnm style) — defaults applied:
+		// OS-only assumes amd64; arch-only assumes linux.
+		{"fnm-linux.zip", "linux_amd64", "", true},
+		{"fnm-macos.zip", "darwin_amd64", "", true},
+		{"fnm-windows.zip", "windows_amd64", "", true},
+		{"fnm-arm64.zip", "linux_arm64", "", true},
+		{"fnm-arm32.zip", "linux_arm", "", true},
+
 		// Should be skipped (not classified as platform)
 		{"bat-v0.24.0.tar.gz", "", "", false},  // source-ish
 		{"README.md", "", "", false},
