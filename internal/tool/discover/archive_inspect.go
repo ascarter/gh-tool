@@ -126,8 +126,14 @@ func isManPage(rel string) bool {
 	if strings.Contains(low, "/man/man") || strings.HasPrefix(low, "man/man") {
 		return true
 	}
-	if manPageRE.MatchString(low) && (strings.Contains(low, "/man/") || strings.HasPrefix(low, "man/")) {
-		return true
+	if !manPageRE.MatchString(low) {
+		return false
+	}
+	// .1-.9 suffix in any of the conventional doc dirs.
+	for _, dir := range []string{"man/", "doc/", "docs/", "share/man/"} {
+		if strings.HasPrefix(low, dir) || strings.Contains(low, "/"+dir) {
+			return true
+		}
 	}
 	return false
 }
