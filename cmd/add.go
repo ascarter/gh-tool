@@ -427,15 +427,19 @@ func chooseAddBins(layout *discover.Layout, repo, inspectAssetName, foldedPatter
 			source = stripArchiveExt(foldedPattern)
 		}
 
-		// Offer to rename only when there's a single binary and its
-		// basename doesn't match the tool name. Multi-binary releases
-		// (e.g. astral-sh/uv ships uv + uvx) should keep their original
-		// names.
+		// Offer to rename only when there's a single binary, the basename
+		// doesn't match the tool name, AND the basename contains a
+		// separator (dash or underscore). That last condition skips the
+		// prompt for short ad-hoc names like "btm" → "bottom" or "rg" →
+		// "ripgrep" while still catching platform-encoded names like
+		// "jq-macos-arm64" or "tool_v1_linux".
 		linkName := source
-		if len(picked) == 1 && !strings.EqualFold(filepath.Base(source), name) {
+		base := filepath.Base(source)
+		hasSep := strings.ContainsAny(base, "-_")
+		if len(picked) == 1 && hasSep && !strings.EqualFold(base, name) {
 			var rename bool
 			if err := survey.AskOne(&survey.Confirm{
-				Message: fmt.Sprintf("Rename symlink %q to %q?", filepath.Base(source), name),
+				Message: fmt.Sprintf("Rename symlink %q to %q?", base, name),
 				Default: true,
 			}, &rename); err != nil {
 				return nil, err
