@@ -56,81 +56,91 @@ func NewManager(dirs paths.Dirs) *Manager {
 
 // Install downloads, extracts, and symlinks a tool. The given config.Tool
 // should carry the *source* spec (raw Pattern/Patterns from the manifest or
-// CLI flags); Install resolves the platform-specific pattern and expands
-// template variables internally. If verify is true, attempts attestation
-// verification on the downloaded asset.
+// CLI flags); Install resolves the platform-specific pattern, expands template
+// variables (including {{tag}} once the latest tag is known), and installs.
+// If verify is true, attempts attestation verification on the downloaded asset.
 func (m *Manager) Install(t config.Tool, verify bool) error {
-	name := t.Name()
-
-	// Ensure directories exist
-	if err := m.Dirs.EnsureDirs(); err != nil {
-		return fmt.Errorf("creating directories: %w", err)
-	}
-
-	// Resolve tag
-	tag := t.Tag
-	if tag == "" || tag == "latest" {
-		tag = ""
-	}
-
-	// Resolve and expand the source pattern for the current platform.
-	resolvedPattern := ExpandPattern(t.ResolvePattern(runtime.GOOS, runtime.GOARCH))
-
-	// Download to cache
-	cacheDir := m.Dirs.CacheDir(name)
-	if err := os.MkdirAll(cacheDir, 0o755); err != nil {
-		return fmt.Errorf("creating cache dir: %w", err)
-	}
-
-	args := []string{"release", "download", "-R", t.Repo, "-D", cacheDir, "--clobber"}
-	if resolvedPattern != "" {
-		args = append(args, "-p", resolvedPattern)
-	}
-	if tag != "" {
-		args = append(args, tag)
-	}
-
-	fmt.Printf("Downloading %s...\n", t.Repo)
-	if _, _, err := gh.Exec(args...); err != nil {
-		return fmt.Errorf("downloading release: %w", err)
-	}
-
-	// Find the downloaded file
-	assetPath, err := findDownloadedAsset(cacheDir)
+	assetPath, tag, err := m.DownloadAsset(t)
 	if err != nil {
 		return err
 	}
+	return m.InstallFromAsset(t, assetPath, tag, verify)
+}
 
-	// Verify attestation if requested
-	if verify {
-		verifyAttestation(t.Repo, assetPath)
+// DownloadAsset resolves the platform-specific pattern, resolves the latest
+// tag (if not pinned), and downloads the matching release asset to the cache.
+// The cache directory is cleared before download so subsequent calls (e.g.
+// findDownloadedAsset) cannot pick up stale files. Returns the local path of
+// the downloaded asset and the tag actually downloaded.
+func (m *Manager) DownloadAsset(t config.Tool) (assetPath, tag string, err error) {
+	name := t.Name()
+
+	if err := m.Dirs.EnsureDirs(); err != nil {
+		return "", "", fmt.Errorf("creating directories: %w", err)
 	}
 
-	// Resolve the tag that was actually downloaded
-	if tag == "" {
+	// Resolve tag first so {{tag}} works in patterns.
+	tag = t.Tag
+	if tag == "" || tag == "latest" {
 		resolved, resolveErr := resolveLatestTag(t.Repo)
-		if resolveErr == nil {
-			tag = resolved
+		if resolveErr != nil {
+			return "", "", fmt.Errorf("resolving latest tag for %s: %w", t.Repo, resolveErr)
 		}
+		tag = resolved
+	}
+
+	rawPattern := t.ResolvePattern(runtime.GOOS, runtime.GOARCH)
+	if rawPattern == "" {
+		return "", "", fmt.Errorf("%s: no pattern for %s/%s (unsupported on this platform)", t.Repo, runtime.GOOS, runtime.GOARCH)
+	}
+	resolvedPattern := ExpandPattern(rawPattern, tag)
+
+	cacheDir := m.Dirs.CacheDir(name)
+	// Clear the cache dir so findDownloadedAsset cannot pick up a stale
+	// asset from a previous install/inspection.
+	_ = os.RemoveAll(cacheDir)
+	if err := os.MkdirAll(cacheDir, 0o755); err != nil {
+		return "", "", fmt.Errorf("creating cache dir: %w", err)
+	}
+
+	args := []string{"release", "download", tag, "-R", t.Repo, "-D", cacheDir, "-p", resolvedPattern, "--clobber"}
+
+	fmt.Printf("Downloading %s %s...\n", t.Repo, tag)
+	if _, _, err := gh.Exec(args...); err != nil {
+		return "", "", fmt.Errorf("downloading release: %w", err)
+	}
+
+	assetPath, err = findDownloadedAsset(cacheDir)
+	if err != nil {
+		return "", "", err
+	}
+	return assetPath, tag, nil
+}
+
+// InstallFromAsset installs a tool from an already-downloaded asset. Performs
+// optional attestation verification, extracts the archive into the tool dir,
+// creates symlinks, and writes the per-machine state file.
+func (m *Manager) InstallFromAsset(t config.Tool, assetPath, tag string, verify bool) error {
+	name := t.Name()
+
+	if verify {
+		verifyAttestation(t.Repo, assetPath)
 	}
 
 	// Clean previous install
 	toolDir := m.Dirs.ToolDir(name)
 	_ = os.RemoveAll(toolDir)
 
-	// Extract
 	fmt.Printf("Extracting %s...\n", filepath.Base(assetPath))
 	if err := archive.Extract(assetPath, toolDir); err != nil {
 		return fmt.Errorf("extracting: %w", err)
 	}
 
-	// Create symlinks
-	if err := m.createSymlinks(t, toolDir); err != nil {
+	if err := m.createSymlinks(t, tag, toolDir); err != nil {
 		return fmt.Errorf("creating symlinks: %w", err)
 	}
 
-	// Write per-machine state. Only resolved/relevant fields are persisted;
-	// the manifest remains the source of truth for the source spec.
+	resolvedPattern := ExpandPattern(t.ResolvePattern(runtime.GOOS, runtime.GOARCH), tag)
 	state := InstalledState{
 		Repo:        t.Repo,
 		Tag:         tag,
@@ -241,7 +251,7 @@ func LatestTag(repo string) (string, error) {
 	return resolveLatestTag(repo)
 }
 
-func (m *Manager) createSymlinks(t config.Tool, toolDir string) error {
+func (m *Manager) createSymlinks(t config.Tool, tag, toolDir string) error {
 	name := t.Name()
 	bins := t.Bin
 	if len(bins) == 0 {
@@ -250,7 +260,7 @@ func (m *Manager) createSymlinks(t config.Tool, toolDir string) error {
 
 	// Bin symlinks
 	for _, bin := range bins {
-		bin = ExpandPattern(bin)
+		bin = ExpandPattern(bin, tag)
 		srcName, linkName := parseBinSpec(bin)
 		src := findFileInDir(toolDir, srcName)
 		if src == "" {
@@ -430,6 +440,29 @@ func verifyAttestation(repo, assetPath string) {
 	}
 }
 
+// Tokens returns the literal expansions of every supported template token
+// for the given platform and tag. Used by ExpandPattern and by the discover
+// package when reverse-folding asset names into patterns.
+func Tokens(goos, goarch, tag string) map[string]string {
+	return map[string]string{
+		"{{os}}":       normalizeOS(goos),
+		"{{arch}}":     normalizeArch(goarch),
+		"{{triple}}":   platformTriple(goos, goarch),
+		"{{platform}}": platformName(goos),
+		"{{gnuarch}}":  gnuArch(goarch),
+		"{{tag}}":      tag,
+	}
+}
+
+// ExpandPatternFor expands template variables for an arbitrary platform.
+// ExpandPattern is the convenience wrapper for the host platform.
+func ExpandPatternFor(pattern, tag, goos, goarch string) string {
+	for token, value := range Tokens(goos, goarch, tag) {
+		pattern = strings.ReplaceAll(pattern, token, value)
+	}
+	return pattern
+}
+
 // ExpandPattern replaces template placeholders in a pattern with runtime-detected values.
 //
 // Supported variables:
@@ -439,18 +472,9 @@ func verifyAttestation(repo, assetPath string) {
 //	{{triple}}   — Rust target triple: aarch64-apple-darwin, x86_64-unknown-linux-gnu, …
 //	{{platform}} — User-facing OS name: macos, linux, windows
 //	{{gnuarch}}  — GNU/Rust-style arch: aarch64, x86_64, i686
-func ExpandPattern(pattern string) string {
-	os := normalizeOS(runtime.GOOS)
-	arch := normalizeArch(runtime.GOARCH)
-	triple := platformTriple(runtime.GOOS, runtime.GOARCH)
-	platform := platformName(runtime.GOOS)
-	gnu := gnuArch(runtime.GOARCH)
-	pattern = strings.ReplaceAll(pattern, "{{os}}", os)
-	pattern = strings.ReplaceAll(pattern, "{{arch}}", arch)
-	pattern = strings.ReplaceAll(pattern, "{{triple}}", triple)
-	pattern = strings.ReplaceAll(pattern, "{{platform}}", platform)
-	pattern = strings.ReplaceAll(pattern, "{{gnuarch}}", gnu)
-	return pattern
+//	{{tag}}      — release tag, e.g. v1.2.3 (empty if not yet resolved)
+func ExpandPattern(pattern, tag string) string {
+	return ExpandPatternFor(pattern, tag, runtime.GOOS, runtime.GOARCH)
 }
 
 func normalizeOS(goos string) string {

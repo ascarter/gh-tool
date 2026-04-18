@@ -1,0 +1,166 @@
+package discover
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"regexp"
+	"strings"
+
+	gh "github.com/cli/go-gh/v2"
+
+	"github.com/ascarter/gh-tool/internal/archive"
+)
+
+// Layout describes what was found inside an extracted asset.
+type Layout struct {
+	// Executables are paths (relative to the extract root) of files with
+	// the executable bit set. On Windows-style assets, .exe files are
+	// included regardless of bit.
+	Executables []string
+
+	// ManPages are relative paths matching man/man[1-9]/* or *.[1-9].
+	ManPages []string
+
+	// Completions are relative paths to *.bash/*.zsh/*.fish files or files
+	// under completions/{bash,zsh,fish}/.
+	Completions []string
+}
+
+// DownloadAsset fetches a single named asset from a release into destDir
+// using the gh CLI and returns the local path.
+func DownloadAsset(repo, tag, assetName, destDir string) (string, error) {
+	if err := os.MkdirAll(destDir, 0o755); err != nil {
+		return "", err
+	}
+	args := []string{"release", "download"}
+	if tag != "" {
+		args = append(args, tag)
+	}
+	args = append(args, "-R", repo, "-D", destDir, "-p", assetName, "--clobber")
+	if _, _, err := gh.Exec(args...); err != nil {
+		return "", fmt.Errorf("downloading %s: %w", assetName, err)
+	}
+	return filepath.Join(destDir, assetName), nil
+}
+
+// Inspect extracts the given asset into a temp directory and walks the
+// resulting tree to find executables, man pages, and shell completions.
+// The temp directory is removed before returning.
+func Inspect(assetPath string) (*Layout, error) {
+	tmp, err := os.MkdirTemp("", "gh-tool-inspect-")
+	if err != nil {
+		return nil, err
+	}
+	defer os.RemoveAll(tmp)
+
+	if err := archive.Extract(assetPath, tmp); err != nil {
+		return nil, fmt.Errorf("extracting %s: %w", assetPath, err)
+	}
+	return scanLayout(tmp)
+}
+
+// manPageRE matches files like "tool.1", "tool.8", or any path ending with
+// a single-digit section suffix.
+var manPageRE = regexp.MustCompile(`\.[1-9]([a-z]?)$`)
+
+// scanLayout walks root and classifies files into executables, man pages,
+// and completions.
+func scanLayout(root string) (*Layout, error) {
+	layout := &Layout{}
+	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() {
+			return nil
+		}
+		rel, _ := filepath.Rel(root, path)
+		rel = filepath.ToSlash(rel)
+		base := strings.ToLower(filepath.Base(rel))
+
+		// Executables: top-level (or single nested dir) with exec bit, or *.exe.
+		if isExecutable(info, base) && isTopOrSingleNested(rel) {
+			layout.Executables = append(layout.Executables, rel)
+		}
+
+		// Man pages: under man/manN/ or with .N suffix, in a man-ish dir.
+		if isManPage(rel) {
+			layout.ManPages = append(layout.ManPages, rel)
+		}
+
+		// Completions.
+		if isCompletion(rel) {
+			layout.Completions = append(layout.Completions, rel)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return layout, nil
+}
+
+func isExecutable(info os.FileInfo, lowerBase string) bool {
+	if strings.HasSuffix(lowerBase, ".exe") {
+		return true
+	}
+	// Any user-execute bit and a regular file qualifies.
+	mode := info.Mode()
+	if !mode.IsRegular() {
+		return false
+	}
+	return mode&0o111 != 0
+}
+
+// isTopOrSingleNested reports whether rel is a single path segment, or sits
+// directly inside one nested dir. Excludes deeply nested files (libexec,
+// vendor binaries, etc.).
+func isTopOrSingleNested(rel string) bool {
+	parts := strings.Split(rel, "/")
+	return len(parts) <= 2
+}
+
+func isManPage(rel string) bool {
+	low := strings.ToLower(rel)
+	if strings.Contains(low, "/man/man") || strings.HasPrefix(low, "man/man") {
+		return true
+	}
+	if manPageRE.MatchString(low) && (strings.Contains(low, "/man/") || strings.HasPrefix(low, "man/")) {
+		return true
+	}
+	return false
+}
+
+func isCompletion(rel string) bool {
+	low := strings.ToLower(rel)
+	for _, ext := range []string{".bash", ".zsh", ".fish"} {
+		if strings.HasSuffix(low, ext) {
+			return true
+		}
+	}
+	// _toolname (zsh) under a completions dir
+	if strings.Contains(low, "/completions/") || strings.HasPrefix(low, "completions/") ||
+		strings.Contains(low, "/autocomplete/") || strings.HasPrefix(low, "autocomplete/") {
+		base := filepath.Base(rel)
+		if strings.HasPrefix(base, "_") {
+			return true
+		}
+	}
+	return false
+}
+
+// MatchBinName picks the executable that best matches the repo name.
+// Returns the relative path of the match, or "" if no good match is found.
+func (l *Layout) MatchBinName(repoName string) string {
+	target := strings.ToLower(repoName)
+	for _, exe := range l.Executables {
+		base := strings.ToLower(filepath.Base(exe))
+		// Strip .exe for matching.
+		base = strings.TrimSuffix(base, ".exe")
+		if base == target {
+			return exe
+		}
+	}
+	return ""
+}

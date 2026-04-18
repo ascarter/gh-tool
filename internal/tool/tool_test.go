@@ -23,7 +23,7 @@ func TestExpandPattern(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		got := ExpandPattern(tt.pattern)
+		got := ExpandPattern(tt.pattern, "")
 		if tt.wantOS != "" {
 			if got == tt.pattern {
 				t.Errorf("ExpandPattern(%q) = %q, expected substitution", tt.pattern, got)
@@ -33,7 +33,7 @@ func TestExpandPattern(t *testing.T) {
 
 	// Specific expansion test
 	pattern := "tool-{{os}}-{{arch}}.tar.gz"
-	got := ExpandPattern(pattern)
+	got := ExpandPattern(pattern, "")
 	expected := "tool-" + normalizeOS(runtime.GOOS) + "-" + normalizeArch(runtime.GOARCH) + ".tar.gz"
 	if got != expected {
 		t.Errorf("ExpandPattern(%q) = %q, want %q", pattern, got, expected)
@@ -130,7 +130,7 @@ func TestPlatformTriple(t *testing.T) {
 
 func TestExpandPatternTriple(t *testing.T) {
 	pattern := "tool-{{triple}}.tar.gz"
-	got := ExpandPattern(pattern)
+	got := ExpandPattern(pattern, "")
 	want := "tool-" + platformTriple(runtime.GOOS, runtime.GOARCH) + ".tar.gz"
 	if got != want {
 		t.Errorf("ExpandPattern(%q) = %q, want %q", pattern, got, want)
@@ -139,7 +139,7 @@ func TestExpandPatternTriple(t *testing.T) {
 
 func TestExpandPatternPlatform(t *testing.T) {
 	pattern := "tool-{{platform}}-{{arch}}.tar.gz"
-	got := ExpandPattern(pattern)
+	got := ExpandPattern(pattern, "")
 	want := "tool-" + platformName(runtime.GOOS) + "-" + normalizeArch(runtime.GOARCH) + ".tar.gz"
 	if got != want {
 		t.Errorf("ExpandPattern(%q) = %q, want %q", pattern, got, want)
@@ -148,10 +148,19 @@ func TestExpandPatternPlatform(t *testing.T) {
 
 func TestExpandPatternGnuArch(t *testing.T) {
 	pattern := "tool-*.{{os}}.{{gnuarch}}.tar.gz"
-	got := ExpandPattern(pattern)
+	got := ExpandPattern(pattern, "")
 	want := "tool-*." + normalizeOS(runtime.GOOS) + "." + gnuArch(runtime.GOARCH) + ".tar.gz"
 	if got != want {
 		t.Errorf("ExpandPattern(%q) = %q, want %q", pattern, got, want)
+	}
+}
+
+func TestExpandPatternTag(t *testing.T) {
+	pattern := "tool-{{tag}}-{{os}}-{{arch}}.tar.gz"
+	got := ExpandPattern(pattern, "v1.2.3")
+	want := "tool-v1.2.3-" + normalizeOS(runtime.GOOS) + "-" + normalizeArch(runtime.GOARCH) + ".tar.gz"
+	if got != want {
+		t.Errorf("ExpandPattern(%q, %q) = %q, want %q", pattern, "v1.2.3", got, want)
 	}
 }
 

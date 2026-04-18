@@ -21,8 +21,8 @@ With no arguments, reconciles the local install set against the manifest:
 installs anything missing, leaves up-to-date tools alone, and (with --force)
 reinstalls everything.
 
-The manifest is treated as a read-only input. Pass --save to record the
-resulting tool spec into the manifest after a single-tool install.`,
+The manifest is treated as a read-only input. To author a new manifest entry
+interactively, use "gh tool add <owner/repo>".`,
 	RunE: runInstall,
 }
 
@@ -35,7 +35,6 @@ var (
 	flagNoVerify bool
 	flagForce    bool
 	flagFile     string
-	flagSave     bool
 )
 
 func init() {
@@ -47,7 +46,6 @@ func init() {
 	installCmd.Flags().BoolVar(&flagNoVerify, "no-verify", false, "skip attestation verification")
 	installCmd.Flags().BoolVar(&flagForce, "force", false, "reinstall even if up-to-date, clearing stale symlinks and cache")
 	installCmd.Flags().StringVarP(&flagFile, "file", "f", "", "path to manifest file (default: $XDG_CONFIG_HOME/gh-tool/config.toml)")
-	installCmd.Flags().BoolVar(&flagSave, "save", false, "record the resulting tool spec into the manifest")
 }
 
 // manifestPath returns the manifest path honoring --file, falling back to the
@@ -71,10 +69,9 @@ func runInstall(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// No args: reconcile from manifest.
 	if len(args) == 0 {
 		if len(cfg.Tools) == 0 {
-			fmt.Println("No tools in manifest. Use: gh tool install <owner/repo> --pattern <pattern> [--save]")
+			fmt.Println("No tools in manifest. Use: gh tool add <owner/repo>")
 			return nil
 		}
 		verify := !flagNoVerify
@@ -124,7 +121,7 @@ func runInstall(cmd *cobra.Command, args []string) error {
 
 	if t.Pattern == "" && len(t.Patterns) == 0 {
 		if manifestEntry == nil {
-			return fmt.Errorf("no manifest entry for %s; supply --pattern or add it to %s", repo, mfPath)
+			return fmt.Errorf("no manifest entry for %s; supply --pattern or run: gh tool add %s", repo, repo)
 		}
 		return fmt.Errorf("--pattern is required (which release asset to download)")
 	}
@@ -132,32 +129,10 @@ func runInstall(cmd *cobra.Command, args []string) error {
 	if flagForce {
 		mgr.CleanupInstall(t.Name())
 	} else if isUpToDate(mgr, t) {
-		// Even when up-to-date, --save should still persist the spec.
-		if flagSave {
-			return saveManifestEntry(mfPath, cfg, t)
-		}
 		return nil
 	}
 
-	if err := mgr.Install(t, !flagNoVerify); err != nil {
-		return err
-	}
-
-	if flagSave {
-		return saveManifestEntry(mfPath, cfg, t)
-	}
-	return nil
-}
-
-// saveManifestEntry writes (or updates) the tool entry into the manifest at
-// mfPath. cfg is the manifest already loaded from that path.
-func saveManifestEntry(mfPath string, cfg *config.Config, t config.Tool) error {
-	cfg.AddOrUpdateTool(t)
-	if err := config.Save(mfPath, cfg); err != nil {
-		return fmt.Errorf("saving manifest: %w", err)
-	}
-	fmt.Printf("✓ Saved %s to %s\n", t.Repo, mfPath)
-	return nil
+	return mgr.Install(t, !flagNoVerify)
 }
 
 // isUpToDate checks whether a tool is already installed at the target version.

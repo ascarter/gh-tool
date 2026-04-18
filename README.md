@@ -54,7 +54,7 @@ eval "$(gh tool shell zsh)"
 
 Declare tools in `$XDG_CONFIG_HOME/gh-tool/config.toml` (typically `~/.config/gh-tool/config.toml`). This file is designed to be checked into a dotfiles repo.
 
-The manifest is a **read-only input** — like a Brewfile. `gh tool install` reads it; nothing writes to it unless you pass `--save`. The local install set is tracked separately in per-tool state files under `$XDG_STATE_HOME/gh-tool/`.
+The manifest is a **read-only input** — like a Brewfile. `gh tool install` reads it; the manifest is only written by `gh tool add` (the interactive authoring command). The local install set is tracked separately in per-tool state files under `$XDG_STATE_HOME/gh-tool/`.
 
 ```toml
 [[tool]]
@@ -115,13 +115,21 @@ Without a manifest entry you can still install one-off:
 gh tool install junegunn/fzf --pattern 'fzf-*-{{os}}_{{arch}}.tar.gz' --bin fzf
 ```
 
-By default this does not modify the manifest — the install only shows up in `gh tool list` (as `orphan` until you add it). Add `--save` to record the resulting spec in the manifest:
+This does not modify the manifest — the install only shows up in `gh tool list` (as `orphan` until you add it). To author a manifest entry interactively, use `gh tool add` (see below).
+
+### Adding a tool interactively
+
+`gh tool add` walks you from `owner/repo` to a working manifest entry without hand-editing TOML. It fetches the latest release, lets you pick the platforms and asset variants you want, folds them into a templated `pattern`, inspects the archive for the binary/man/completion paths, then writes the entry and installs it on the host:
 
 ```sh
-gh tool install junegunn/fzf --pattern 'fzf-*-{{os}}_{{arch}}.tar.gz' --save
+gh tool add sharkdp/bat
 ```
 
-Note: `--save` reformats the manifest (TOML comments and key ordering are not preserved). Editing the manifest by hand is the recommended workflow for most users.
+Steps with a single obvious answer are auto-skipped (e.g., one platform, one matching executable, no completions found).
+
+`--file/-f` writes the entry to an alternate manifest. `--tag/-t` pins inspection to a specific release.
+
+The command requires an interactive terminal. For non-interactive workflows, use `gh tool install` with explicit flags or edit the manifest directly. Note: the manifest is reformatted on write — TOML comments and key ordering are not preserved.
 
 ### Tool Attributes
 
@@ -149,6 +157,7 @@ Patterns support template variables that expand to platform-specific values at r
 | `{{triple}}`   | Rust target triple            | `aarch64-apple-darwin`   | `x86_64-unknown-linux-gnu`       |
 | `{{platform}}` | User-facing OS name           | `macos`                  | `linux`                          |
 | `{{gnuarch}}`  | GNU/Rust-style architecture   | `aarch64`                | `x86_64`                         |
+| `{{tag}}`      | Resolved release tag          | `v0.24.0`                | `v0.24.0`                        |
 
 Use `{{os}}` / `{{arch}}` for Go-style release naming (e.g., `fzf-*-{{os}}_{{arch}}.tar.gz`).
 Use `{{triple}}` for Rust-style naming (e.g., `ripgrep-*-{{triple}}.tar.gz`).
@@ -205,6 +214,7 @@ Values are Go-style OS names: `darwin`, `linux`, `windows`. If `os` is omitted, 
 ## Commands
 
 ```
+gh tool add <owner/repo>        Interactively author a manifest entry and install
 gh tool install [owner/repo]    Reconcile from manifest, or install a single tool
 gh tool remove <owner/repo>     Remove an installed tool (manifest is not modified)
 gh tool list                    List installed tools and any drift from the manifest
@@ -215,7 +225,8 @@ gh tool shell <bash|zsh>        Print shell integration config
 gh tool version                 Print version
 ```
 
-`install` flags: `--pattern/-p`, `--tag/-t`, `--bin`, `--man`, `--completion`, `--no-verify`, `--force`, `--file/-f`, `--save`.
+`add` flags: `--file/-f`, `--tag/-t`.
+`install` flags: `--pattern/-p`, `--tag/-t`, `--bin`, `--man`, `--completion`, `--no-verify`, `--force`, `--file/-f`.
 
 ### List status values
 

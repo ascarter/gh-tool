@@ -142,7 +142,7 @@ func classifyInstalled(state tool.InstalledState, manifest config.Tool, inManife
 // repo. Compares the manifest's resolved pattern (for this host) and the
 // per-tool fields actually persisted in state.
 func specDriftsFromManifest(state tool.InstalledState, manifest config.Tool) bool {
-	manifestResolved := tool.ExpandPattern(manifest.ResolvePattern(runtime.GOOS, runtime.GOARCH))
+	manifestResolved := tool.ExpandPattern(manifest.ResolvePattern(runtime.GOOS, runtime.GOARCH), state.Tag)
 	if state.Pattern != "" && manifestResolved != "" && state.Pattern != manifestResolved {
 		return true
 	}
