@@ -8,7 +8,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/AlecAivazis/survey/v2"
 	"github.com/BurntSushi/toml"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
@@ -165,7 +164,7 @@ or edit your manifest directly.`, args[0])
 		defaultYes = false
 	}
 	var ok bool
-	if err := survey.AskOne(&survey.Confirm{Message: prompt, Default: defaultYes}, &ok); err != nil {
+	if err := promptConfirm(prompt, defaultYes, &ok); err != nil {
 		return err
 	}
 	if !ok {
@@ -206,11 +205,7 @@ func chooseAddPlatforms(platforms []discover.PlatformKey) ([]discover.PlatformKe
 		}
 	}
 	var picked []string
-	if err := survey.AskOne(&survey.MultiSelect{
-		Message: "Select platforms to include:",
-		Options: options,
-		Default: defaults,
-	}, &picked, survey.WithValidator(survey.MinItems(1))); err != nil {
+	if err := promptMultiSelect("Select platforms to include:", options, defaults, &picked); err != nil {
 		return nil, err
 	}
 	out := make([]discover.PlatformKey, 0, len(picked))
@@ -244,10 +239,7 @@ func chooseAddVariants(rel *discover.Release, platforms []discover.PlatformKey) 
 			options[i] = a.Name
 		}
 		var pick string
-		if err := survey.AskOne(&survey.Select{
-			Message: fmt.Sprintf("Choose asset for %s:", p),
-			Options: options,
-		}, &pick); err != nil {
+		if err := promptSelect(fmt.Sprintf("Choose asset for %s:", p), options, &pick); err != nil {
 			return nil, err
 		}
 		chosen[p] = pick
@@ -296,10 +288,7 @@ func preselectVariantPerOS(rel *discover.Release, platforms []discover.PlatformK
 		}
 
 		var pick string
-		if err := survey.AskOne(&survey.Select{
-			Message: fmt.Sprintf("Variant for %s (applies to %d platforms):", goos, len(group)),
-			Options: common,
-		}, &pick); err != nil {
+		if err := promptSelect(fmt.Sprintf("Variant for %s (applies to %d platforms):", goos, len(group)), common, &pick); err != nil {
 			// On error or interrupt, skip pre-selection; per-platform prompt
 			// will run as a fallback.
 			continue
@@ -350,7 +339,7 @@ func confirmAddPattern(fold *discover.FoldResult, tag string, chosen map[discove
 			return nil
 		}
 		var ok bool
-		if err := survey.AskOne(&survey.Confirm{Message: "Use this pattern?", Default: true}, &ok); err != nil {
+		if err := promptConfirm("Use this pattern?", true, &ok); err != nil {
 			return err
 		}
 		if !ok {
@@ -405,11 +394,7 @@ func chooseAddBins(layout *discover.Layout, repo, inspectAssetName, foldedPatter
 		for i, e := range layout.Executables {
 			options[i] = e
 		}
-		if err := survey.AskOne(&survey.MultiSelect{
-			Message: "Select binaries to symlink:",
-			Options: options,
-			Default: options,
-		}, &picked); err != nil {
+		if err := promptMultiSelect("Select binaries to symlink:", options, options, &picked); err != nil {
 			return nil, err
 		}
 	}
@@ -437,10 +422,7 @@ func chooseAddBins(layout *discover.Layout, repo, inspectAssetName, foldedPatter
 		hasSep := strings.ContainsAny(base, "-_")
 		if len(picked) == 1 && hasSep && !strings.EqualFold(base, name) {
 			var rename bool
-			if err := survey.AskOne(&survey.Confirm{
-				Message: fmt.Sprintf("Rename symlink %q to %q?", base, name),
-				Default: true,
-			}, &rename); err != nil {
+			if err := promptConfirm(fmt.Sprintf("Rename symlink %q to %q?", base, name), true, &rename); err != nil {
 				return nil, err
 			}
 			if rename {
@@ -472,25 +454,9 @@ func chooseAddPaths(label string, found []string) ([]string, error) {
 	if len(found) == 0 {
 		return nil, nil
 	}
-	var include bool
-	if err := survey.AskOne(&survey.Confirm{
-		Message: fmt.Sprintf("Include %d %s?", len(found), label),
-		Default: true,
-	}, &include); err != nil {
-		return nil, err
-	}
-	if !include {
-		return nil, nil
-	}
-	if len(found) == 1 {
-		return found, nil
-	}
 	var picked []string
-	if err := survey.AskOne(&survey.MultiSelect{
-		Message: fmt.Sprintf("Select %s to include:", label),
-		Options: found,
-		Default: found,
-	}, &picked); err != nil {
+	title := fmt.Sprintf("Select %s to include (none to skip):", label)
+	if err := promptMultiSelectOptional(title, found, found, &picked); err != nil {
 		return nil, err
 	}
 	return picked, nil
