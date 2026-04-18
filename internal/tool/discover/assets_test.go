@@ -39,6 +39,13 @@ func TestClassify(t *testing.T) {
 		{"fnm-arm64.zip", "linux_arm64", "", true},
 		{"fnm-arm32.zip", "linux_arm", "", true},
 
+		// Unsupported architectures must NOT fall back to the OS-only
+		// amd64 default (uv ships powerpc/riscv/s390x variants).
+		{"uv-powerpc64le-unknown-linux-gnu.tar.gz", "", "", false},
+		{"uv-riscv64gc-unknown-linux-gnu.tar.gz", "", "", false},
+		{"uv-riscv64gc-unknown-linux-musl.tar.gz", "", "", false},
+		{"uv-s390x-unknown-linux-gnu.tar.gz", "", "", false},
+
 		// Should be skipped (not classified as platform)
 		{"bat-v0.24.0.tar.gz", "", "", false},  // source-ish
 		{"README.md", "", "", false},

@@ -189,6 +189,32 @@ func isSkippable(name string) bool {
 // underscore-split sub-tokens so simple "amd64" matches still work.
 var tokenBoundaryRE = regexp.MustCompile(`[-./\\ ]`)
 
+// unsupportedArchTokens are architecture markers we don't target. When any
+// of these appear in an asset name, the asset is treated as for a different
+// architecture (and not as an OS-only "default to amd64" candidate).
+var unsupportedArchTokens = []string{
+	"powerpc", "powerpc64", "powerpc64le", "ppc64", "ppc64le", "ppc",
+	"riscv", "riscv64", "riscv64gc",
+	"s390", "s390x",
+	"mips", "mips64", "mipsel", "mips64el",
+	"loongarch", "loongarch64",
+	"sparc", "sparc64",
+}
+
+// hasUnsupportedArch reports whether any chunk of name contains a substring
+// matching an unsupported arch marker. Substring (not whole-token) match
+// because compound chunks like "powerpc64le" should still hit "powerpc".
+func hasUnsupportedArch(tokenSet map[string]bool) bool {
+	for chunk := range tokenSet {
+		for _, tok := range unsupportedArchTokens {
+			if strings.Contains(chunk, tok) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // Classify maps an asset filename to a (PlatformKey, variant). Returns ok=false
 // when the asset can't be assigned to a platform (e.g., source bundles, docs).
 func Classify(name string) (key PlatformKey, variant string, ok bool) {
@@ -212,6 +238,11 @@ func Classify(name string) (key PlatformKey, variant string, ok bool) {
 	}
 
 	if goos == "" && goarch == "" {
+		return "", "", false
+	}
+	// Reject assets that explicitly target an unsupported architecture so
+	// the OS-only default below doesn't misclassify them as amd64.
+	if goarch == "" && hasUnsupportedArch(tokenSet) {
 		return "", "", false
 	}
 	// Apply conventional defaults for projects that ship per-OS or per-arch
