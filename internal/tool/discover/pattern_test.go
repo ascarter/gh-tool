@@ -73,8 +73,11 @@ func TestFoldExtensionMismatchFallsBack(t *testing.T) {
 	if got.Pattern != "" {
 		t.Errorf("expected patterns fallback, got pattern %q", got.Pattern)
 	}
-	if got.Patterns["darwin_amd64"] != "fzf-0.46.1-darwin_amd64.zip" {
-		t.Errorf("patterns map missing darwin_amd64: %+v", got.Patterns)
+	if got.Patterns["darwin_amd64"] != "fzf-{{tag}}-darwin_amd64.zip" {
+		t.Errorf("patterns map missing/wrong darwin_amd64: %+v", got.Patterns)
+	}
+	if got.Patterns["linux_amd64"] != "fzf-{{tag}}-linux_amd64.tar.gz" {
+		t.Errorf("patterns map missing/wrong linux_amd64: %+v", got.Patterns)
 	}
 }
 

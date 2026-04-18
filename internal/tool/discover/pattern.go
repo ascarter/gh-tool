@@ -49,10 +49,15 @@ func Fold(tag string, selected map[PlatformKey]string) FoldResult {
 		}
 	}
 
-	// Fallback: per-platform patterns map.
+	// Fallback: per-platform patterns map. Still substitute the tag in
+	// each entry so upgrades pick up the new version automatically.
 	patterns := make(map[string]string, len(selected))
 	for k, v := range selected {
-		patterns[string(k)] = v
+		entry := v
+		if tag != "" && strings.Contains(entry, tag) {
+			entry = strings.ReplaceAll(entry, tag, "{{tag}}")
+		}
+		patterns[string(k)] = entry
 	}
 	return FoldResult{Patterns: patterns}
 }

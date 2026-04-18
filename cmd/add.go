@@ -163,7 +163,7 @@ or edit your manifest directly.`, args[0])
 
 	previewAddEntry(t)
 
-	prompt := "Save and install?"
+	prompt := "Save?"
 	if !hostSupported {
 		prompt = "Save? (install will be skipped on this host)"
 	}

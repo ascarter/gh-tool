@@ -139,9 +139,10 @@ func isCompletion(rel string) bool {
 			return true
 		}
 	}
-	// _toolname (zsh) under a completions dir
+	// _toolname (zsh) under a completions-style dir
 	if strings.Contains(low, "/completions/") || strings.HasPrefix(low, "completions/") ||
-		strings.Contains(low, "/autocomplete/") || strings.HasPrefix(low, "autocomplete/") {
+		strings.Contains(low, "/autocomplete/") || strings.HasPrefix(low, "autocomplete/") ||
+		strings.Contains(low, "/complete/") || strings.HasPrefix(low, "complete/") {
 		base := filepath.Base(rel)
 		if strings.HasPrefix(base, "_") {
 			return true
