@@ -398,18 +398,17 @@ func chooseAddBins(layout *discover.Layout, repo, inspectAssetName, foldedPatter
 		picked = []string{match}
 	} else {
 		options := make([]string, len(layout.Executables))
-		defaults := []string{}
+		// Default to selecting every detected executable. Multi-binary
+		// releases (uv: uv+uvx, git: many) almost always want all of
+		// them, and a single-executable case where the name doesn't
+		// match the repo (handled below) still wants the binary.
 		for i, e := range layout.Executables {
 			options[i] = e
-			base := strings.TrimSuffix(strings.ToLower(filepath.Base(e)), ".exe")
-			if base == strings.ToLower(name) {
-				defaults = append(defaults, e)
-			}
 		}
 		if err := survey.AskOne(&survey.MultiSelect{
 			Message: "Select binaries to symlink:",
 			Options: options,
-			Default: defaults,
+			Default: options,
 		}, &picked); err != nil {
 			return nil, err
 		}
