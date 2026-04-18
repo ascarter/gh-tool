@@ -121,3 +121,19 @@ func TestFoldGnuTriplePreferredOverMusl(t *testing.T) {
 		t.Errorf("Fold pattern = %q, want %q", got.Pattern, "bat-{{tag}}-{{triple}}.tar.gz")
 	}
 }
+
+func TestFoldTagWithoutVPrefix(t *testing.T) {
+// fzf style: tag is "v0.71.0" but assets use "0.71.0". The folded
+// pattern should use "*" as a wildcard so gh release download still
+// resolves the asset on subsequent versions.
+got := Fold("v0.71.0", map[PlatformKey]string{
+"darwin_amd64": "fzf-0.71.0-darwin_amd64.tar.gz",
+"darwin_arm64": "fzf-0.71.0-darwin_arm64.tar.gz",
+"linux_amd64":  "fzf-0.71.0-linux_amd64.tar.gz",
+"linux_arm64":  "fzf-0.71.0-linux_arm64.tar.gz",
+})
+want := "fzf-*-{{os}}_{{arch}}.tar.gz"
+if got.Pattern != want {
+t.Errorf("Fold pattern = %q, want %q (got=%+v)", got.Pattern, want, got)
+}
+}

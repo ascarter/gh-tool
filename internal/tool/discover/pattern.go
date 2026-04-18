@@ -53,13 +53,29 @@ func Fold(tag string, selected map[PlatformKey]string) FoldResult {
 	// each entry so upgrades pick up the new version automatically.
 	patterns := make(map[string]string, len(selected))
 	for k, v := range selected {
-		entry := v
-		if tag != "" && strings.Contains(entry, tag) {
-			entry = strings.ReplaceAll(entry, tag, "{{tag}}")
-		}
-		patterns[string(k)] = entry
+		patterns[string(k)] = substituteTag(v, tag)
 	}
 	return FoldResult{Patterns: patterns}
+}
+
+// substituteTag rewrites occurrences of the tag in s. The literal tag is
+// replaced with {{tag}}; if the literal isn't present but the tag without a
+// leading "v" is, that form is replaced with "*" (a glob wildcard accepted
+// by gh release download). Both placements coexist for projects that mix
+// the two styles.
+func substituteTag(s, tag string) string {
+	if tag == "" {
+		return s
+	}
+	out := s
+	if strings.Contains(out, tag) {
+		out = strings.ReplaceAll(out, tag, "{{tag}}")
+	}
+	stripped := strings.TrimPrefix(tag, "v")
+	if stripped != tag && stripped != "" && strings.Contains(out, stripped) {
+		out = strings.ReplaceAll(out, stripped, "*")
+	}
+	return out
 }
 
 // candidateTemplates returns templates derived from one (asset, platform)
@@ -68,11 +84,11 @@ func candidateTemplates(asset, tag string, key PlatformKey) []string {
 	tokens := tool.Tokens(key.GOOS(), key.GOARCH(), tag)
 
 	// Substitute the tag token first; it is independent of platform tokens.
-	// Substitute longest tags first to avoid prefix collisions.
-	tagBase := asset
-	if tag != "" && strings.Contains(asset, tag) {
-		tagBase = strings.ReplaceAll(asset, tag, "{{tag}}")
-	}
+	// Prefer the literal tag (round-trips exactly via {{tag}}); fall back
+	// to the no-leading-"v" form substituted with "*" as a glob wildcard
+	// (gh release download -p accepts globs). This handles projects whose
+	// tag is "v1.2.3" but whose assets embed "1.2.3".
+	tagBase := substituteTag(asset, tag)
 
 	// Strategies — each substitutes one platform-token combination.
 	type strategy struct {
@@ -125,14 +141,48 @@ func candidateTemplates(asset, tag string, key PlatformKey) []string {
 }
 
 // verifyTemplate expands the template for every platform and checks the
-// result equals the literal asset name selected for that platform. This
-// is the required exact round-trip check.
+// result equals the literal asset name selected for that platform. A
+// literal "*" in the template is treated as a glob (one or more chars,
+// no slashes) so wildcard tag substitutions still round-trip.
 func verifyTemplate(template, tag string, selected map[PlatformKey]string) bool {
 	for key, asset := range selected {
 		expanded := tool.ExpandPatternFor(template, tag, key.GOOS(), key.GOARCH())
-		if expanded != asset {
+		if !matchExpanded(expanded, asset) {
 			return false
 		}
 	}
 	return true
+}
+
+// matchExpanded compares an expanded pattern against an asset name,
+// honoring "*" in the pattern as a non-empty, slash-free glob.
+func matchExpanded(pattern, asset string) bool {
+	if !strings.Contains(pattern, "*") {
+		return pattern == asset
+	}
+	parts := strings.Split(pattern, "*")
+	if !strings.HasPrefix(asset, parts[0]) {
+		return false
+	}
+	rest := asset[len(parts[0]):]
+	for i := 1; i < len(parts); i++ {
+		seg := parts[i]
+		if seg == "" {
+			// Trailing "*" — accept any remaining non-empty content.
+			if i == len(parts)-1 {
+				return rest != "" && !strings.Contains(rest, "/")
+			}
+			continue
+		}
+		idx := strings.Index(rest, seg)
+		if idx <= 0 {
+			// Need at least one char before the next literal segment.
+			return false
+		}
+		if strings.Contains(rest[:idx], "/") {
+			return false
+		}
+		rest = rest[idx+len(seg):]
+	}
+	return rest == ""
 }
