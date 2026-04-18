@@ -222,10 +222,21 @@ func chooseAddPlatforms(platforms []discover.PlatformKey) ([]discover.PlatformKe
 
 func chooseAddVariants(rel *discover.Release, platforms []discover.PlatformKey) (map[discover.PlatformKey]string, error) {
 	chosen := map[discover.PlatformKey]string{}
+
+	// Pre-pass: when multiple platforms of the same OS each have a
+	// libc/build variant choice (e.g. musl vs gnu on Linux), ask once
+	// and apply to every platform in that OS group. Skips the noisy
+	// per-platform prompt for the common case.
+	preselected := preselectVariantPerOS(rel, platforms)
+
 	for _, p := range platforms {
 		assets := rel.ByPlatform[p]
 		if len(assets) == 1 {
 			chosen[p] = assets[0].Name
+			continue
+		}
+		if name, ok := preselected[p]; ok {
+			chosen[p] = name
 			continue
 		}
 		options := make([]string, len(assets))
@@ -242,6 +253,84 @@ func chooseAddVariants(rel *discover.Release, platforms []discover.PlatformKey) 
 		chosen[p] = pick
 	}
 	return chosen, nil
+}
+
+// preselectVariantPerOS prompts once per OS for the variant (musl/gnu/etc.)
+// to use across every selected platform of that OS. Returns a map from
+// PlatformKey to the chosen asset name. Platforms not covered (e.g., the OS
+// has only one platform, or variants do not match across platforms) are
+// omitted, and the caller falls back to per-platform prompting.
+func preselectVariantPerOS(rel *discover.Release, platforms []discover.PlatformKey) map[discover.PlatformKey]string {
+	out := map[discover.PlatformKey]string{}
+
+	// Group platforms by OS, but only include ones with multiple assets.
+	byOS := map[string][]discover.PlatformKey{}
+	for _, p := range platforms {
+		if len(rel.ByPlatform[p]) <= 1 {
+			continue
+		}
+		byOS[p.GOOS()] = append(byOS[p.GOOS()], p)
+	}
+
+	for goos, group := range byOS {
+		if len(group) < 2 {
+			continue
+		}
+
+		// Intersect the variant sets across every platform in the group.
+		// A variant is only offerable if every platform has an asset for it.
+		variantsByPlatform := make([]map[string]string, 0, len(group))
+		for _, p := range group {
+			vmap := map[string]string{}
+			for _, a := range rel.ByPlatform[p] {
+				if a.Variant != "" {
+					vmap[a.Variant] = a.Name
+				}
+			}
+			variantsByPlatform = append(variantsByPlatform, vmap)
+		}
+		common := commonKeys(variantsByPlatform)
+		if len(common) < 2 {
+			// No meaningful choice to offer; fall back to per-platform prompts.
+			continue
+		}
+
+		var pick string
+		if err := survey.AskOne(&survey.Select{
+			Message: fmt.Sprintf("Variant for %s (applies to %d platforms):", goos, len(group)),
+			Options: common,
+		}, &pick); err != nil {
+			// On error or interrupt, skip pre-selection; per-platform prompt
+			// will run as a fallback.
+			continue
+		}
+		for i, p := range group {
+			out[p] = variantsByPlatform[i][pick]
+		}
+	}
+	return out
+}
+
+// commonKeys returns keys present in every map, sorted.
+func commonKeys(maps []map[string]string) []string {
+	if len(maps) == 0 {
+		return nil
+	}
+	out := []string{}
+	for k := range maps[0] {
+		ok := true
+		for _, m := range maps[1:] {
+			if _, found := m[k]; !found {
+				ok = false
+				break
+			}
+		}
+		if ok {
+			out = append(out, k)
+		}
+	}
+	sort.Strings(out)
+	return out
 }
 
 func confirmAddPattern(fold *discover.FoldResult, tag string, chosen map[discover.PlatformKey]string) error {
