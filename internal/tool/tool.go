@@ -5,7 +5,9 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
+	"time"
 
 	"github.com/BurntSushi/toml"
 	gh "github.com/cli/go-gh/v2"
@@ -15,11 +17,31 @@ import (
 	"github.com/ascarter/gh-tool/internal/paths"
 )
 
-// InstalledState tracks what version/tag is installed for a tool.
+// InstalledState records the per-machine install of a tool. It is the
+// authoritative inventory entry used by list, remove, and upgrade. Only
+// fields meaningful on the host where the install lives are stored.
 type InstalledState struct {
-	Repo    string `toml:"repo"`
-	Tag     string `toml:"tag"`
-	Pattern string `toml:"pattern"`
+	Repo        string   `toml:"repo"`
+	Tag         string   `toml:"tag"`
+	Pattern     string   `toml:"pattern,omitempty"` // resolved+expanded pattern actually downloaded
+	Bin         []string `toml:"bin,omitempty"`
+	Man         []string `toml:"man,omitempty"`
+	Completions []string `toml:"completions,omitempty"`
+	InstalledAt string   `toml:"installed_at,omitempty"` // RFC3339 UTC
+}
+
+// AsTool returns a config.Tool reconstructed from the installed state.
+// Used to drive upgrade/reinstall without consulting the manifest. The
+// resolved pattern is reused as-is; the host platform is unchanged.
+func (s InstalledState) AsTool() config.Tool {
+	return config.Tool{
+		Repo:        s.Repo,
+		Pattern:     s.Pattern,
+		Tag:         s.Tag,
+		Bin:         s.Bin,
+		Man:         s.Man,
+		Completions: s.Completions,
+	}
 }
 
 // Manager handles tool installation, removal, and state management.
@@ -32,8 +54,11 @@ func NewManager(dirs paths.Dirs) *Manager {
 	return &Manager{Dirs: dirs}
 }
 
-// Install downloads, extracts, and symlinks a tool.
-// If verify is true, attempts attestation verification on the downloaded asset.
+// Install downloads, extracts, and symlinks a tool. The given config.Tool
+// should carry the *source* spec (raw Pattern/Patterns from the manifest or
+// CLI flags); Install resolves the platform-specific pattern and expands
+// template variables internally. If verify is true, attempts attestation
+// verification on the downloaded asset.
 func (m *Manager) Install(t config.Tool, verify bool) error {
 	name := t.Name()
 
@@ -48,6 +73,9 @@ func (m *Manager) Install(t config.Tool, verify bool) error {
 		tag = ""
 	}
 
+	// Resolve and expand the source pattern for the current platform.
+	resolvedPattern := ExpandPattern(t.ResolvePattern(runtime.GOOS, runtime.GOARCH))
+
 	// Download to cache
 	cacheDir := m.Dirs.CacheDir(name)
 	if err := os.MkdirAll(cacheDir, 0o755); err != nil {
@@ -55,8 +83,8 @@ func (m *Manager) Install(t config.Tool, verify bool) error {
 	}
 
 	args := []string{"release", "download", "-R", t.Repo, "-D", cacheDir, "--clobber"}
-	if t.Pattern != "" {
-		args = append(args, "-p", t.Pattern)
+	if resolvedPattern != "" {
+		args = append(args, "-p", resolvedPattern)
 	}
 	if tag != "" {
 		args = append(args, tag)
@@ -101,11 +129,16 @@ func (m *Manager) Install(t config.Tool, verify bool) error {
 		return fmt.Errorf("creating symlinks: %w", err)
 	}
 
-	// Write state
+	// Write per-machine state. Only resolved/relevant fields are persisted;
+	// the manifest remains the source of truth for the source spec.
 	state := InstalledState{
-		Repo:    t.Repo,
-		Tag:     tag,
-		Pattern: t.Pattern,
+		Repo:        t.Repo,
+		Tag:         tag,
+		Pattern:     resolvedPattern,
+		Bin:         t.Bin,
+		Man:         t.Man,
+		Completions: t.Completions,
+		InstalledAt: time.Now().UTC().Format(time.RFC3339),
 	}
 	if err := m.writeState(name, state); err != nil {
 		return fmt.Errorf("writing state: %w", err)
@@ -123,20 +156,28 @@ func (m *Manager) Install(t config.Tool, verify bool) error {
 func (m *Manager) Remove(t config.Tool) error {
 	name := t.Name()
 
-	// Remove symlinks
-	m.removeSymlinks(t)
-
-	// Remove tool directory
-	_ = os.RemoveAll(m.Dirs.ToolDir(name))
-
-	// Remove cache
-	_ = os.RemoveAll(m.Dirs.CacheDir(name))
-
-	// Remove state
-	_ = os.Remove(m.Dirs.StateFile(name))
+	m.cleanupInstall(name)
 
 	fmt.Printf("✓ Removed %s\n", name)
 	return nil
+}
+
+// CleanupInstall removes all on-disk artifacts for a tool without touching
+// the manifest: symlinks pointing into the tool's ToolDir, the ToolDir
+// itself, its cache directory, and the state file. Safe to call when no
+// prior install exists.
+func (m *Manager) CleanupInstall(name string) {
+	m.cleanupInstall(name)
+}
+
+// cleanupInstall removes all on-disk artifacts for a tool: symlinks pointing
+// into the tool's ToolDir, the ToolDir itself, its cache directory, and the
+// state file. The manifest entry is not touched.
+func (m *Manager) cleanupInstall(name string) {
+	m.removeToolSymlinks(name)
+	_ = os.RemoveAll(m.Dirs.ToolDir(name))
+	_ = os.RemoveAll(m.Dirs.CacheDir(name))
+	_ = os.Remove(m.Dirs.StateFile(name))
 }
 
 // ReadState returns the installed state for a tool, or nil if not installed.
@@ -147,6 +188,52 @@ func (m *Manager) ReadState(name string) *InstalledState {
 		return nil
 	}
 	return state
+}
+
+// ListInstalled returns all installed tools by scanning the state directory.
+// Results are sorted by tool name.
+func (m *Manager) ListInstalled() ([]InstalledState, error) {
+	entries, err := os.ReadDir(m.Dirs.State)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	var states []InstalledState
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".toml") {
+			continue
+		}
+		name := strings.TrimSuffix(e.Name(), ".toml")
+		s := m.ReadState(name)
+		if s == nil || s.Repo == "" {
+			continue
+		}
+		states = append(states, *s)
+	}
+	sort.Slice(states, func(i, j int) bool {
+		return states[i].Repo < states[j].Repo
+	})
+	return states, nil
+}
+
+// BackfillState fills in missing fields on a state record from a manifest
+// entry. This handles state files written before the schema was expanded.
+// Mutates state in place.
+func BackfillState(state *InstalledState, manifestTool *config.Tool) {
+	if state == nil || manifestTool == nil {
+		return
+	}
+	if len(state.Bin) == 0 {
+		state.Bin = manifestTool.Bin
+	}
+	if len(state.Man) == 0 {
+		state.Man = manifestTool.Man
+	}
+	if len(state.Completions) == 0 {
+		state.Completions = manifestTool.Completions
+	}
 }
 
 // LatestTag returns the latest release tag for a repo.
@@ -207,25 +294,56 @@ func (m *Manager) createSymlinks(t config.Tool, toolDir string) error {
 	return nil
 }
 
-func (m *Manager) removeSymlinks(t config.Tool) {
-	name := t.Name()
-	bins := t.Bin
-	if len(bins) == 0 {
-		bins = []string{name}
+func (m *Manager) removeToolSymlinks(name string) {
+	toolDir := m.Dirs.ToolDir(name)
+	dirs := []string{
+		m.Dirs.BinDir(),
+		m.Dirs.ManDir(),
+		m.Dirs.ZshCompletionDir(),
+		m.Dirs.BashCompletionDir(),
 	}
+	for _, dir := range dirs {
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			continue
+		}
+		for _, e := range entries {
+			path := filepath.Join(dir, e.Name())
+			info, err := os.Lstat(path)
+			if err != nil || info.Mode()&os.ModeSymlink == 0 {
+				continue
+			}
+			target, err := os.Readlink(path)
+			if err != nil {
+				continue
+			}
+			if !filepath.IsAbs(target) {
+				target = filepath.Join(dir, target)
+			}
+			resolved, err := filepath.Abs(target)
+			if err != nil {
+				continue
+			}
+			absToolDir, err := filepath.Abs(toolDir)
+			if err != nil {
+				continue
+			}
+			if pathWithin(resolved, absToolDir) {
+				_ = os.Remove(path)
+			}
+		}
+	}
+}
 
-	for _, bin := range bins {
-		_, linkName := parseBinSpec(bin)
-		_ = os.Remove(filepath.Join(m.Dirs.BinDir(), linkName))
+// pathWithin reports whether child is equal to or nested inside parent.
+func pathWithin(child, parent string) bool {
+	parent = filepath.Clean(parent)
+	child = filepath.Clean(child)
+	if child == parent {
+		return true
 	}
-	for _, man := range t.Man {
-		_ = os.Remove(filepath.Join(m.Dirs.ManDir(), filepath.Base(man)))
-	}
-	for _, comp := range t.Completions {
-		base := filepath.Base(comp)
-		_ = os.Remove(filepath.Join(m.Dirs.ZshCompletionDir(), base))
-		_ = os.Remove(filepath.Join(m.Dirs.BashCompletionDir(), base))
-	}
+	sep := string(filepath.Separator)
+	return strings.HasPrefix(child, parent+sep)
 }
 
 func (m *Manager) writeState(name string, state InstalledState) error {

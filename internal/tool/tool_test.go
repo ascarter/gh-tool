@@ -1,8 +1,14 @@
 package tool
 
 import (
+	"os"
+	"path/filepath"
+	"reflect"
 	"runtime"
 	"testing"
+
+	"github.com/ascarter/gh-tool/internal/config"
+	"github.com/ascarter/gh-tool/internal/paths"
 )
 
 func TestExpandPattern(t *testing.T) {
@@ -149,6 +155,290 @@ func TestExpandPatternGnuArch(t *testing.T) {
 	}
 }
 
+func TestRemoveToolSymlinks(t *testing.T) {
+	root := t.TempDir()
+	dirs := paths.Dirs{
+		Config: filepath.Join(root, "config"),
+		Data:   filepath.Join(root, "data"),
+		State:  filepath.Join(root, "state"),
+		Cache:  filepath.Join(root, "cache"),
+	}
+	if err := dirs.EnsureDirs(); err != nil {
+		t.Fatalf("EnsureDirs: %v", err)
+	}
+	mgr := NewManager(dirs)
+
+	name := "mytool"
+	toolDir := dirs.ToolDir(name)
+	otherDir := filepath.Join(root, "other")
+	for _, d := range []string{toolDir, otherDir} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", d, err)
+		}
+	}
+
+	// Files inside the tool dir (real targets).
+	toolBin := filepath.Join(toolDir, "mytool-old")
+	newBin := filepath.Join(toolDir, "mytool-new")
+	manSrc := filepath.Join(toolDir, "mytool.1")
+	compSrc := filepath.Join(toolDir, "_mytool")
+	bashCompSrc := filepath.Join(toolDir, "mytool.bash")
+	for _, f := range []string{toolBin, newBin, manSrc, compSrc, bashCompSrc} {
+		if err := os.WriteFile(f, []byte("x"), 0o755); err != nil {
+			t.Fatalf("write %s: %v", f, err)
+		}
+	}
+	// Unrelated target outside the tool dir.
+	otherBin := filepath.Join(otherDir, "unrelated")
+	if err := os.WriteFile(otherBin, []byte("x"), 0o755); err != nil {
+		t.Fatalf("write other: %v", err)
+	}
+
+	// Symlinks pointing into the tool dir (should be removed).
+	managedOldLink := filepath.Join(dirs.BinDir(), "old-name")
+	managedNewLink := filepath.Join(dirs.BinDir(), "mytool")
+	managedManLink := filepath.Join(dirs.ManDir(), "mytool.1")
+	managedZshLink := filepath.Join(dirs.ZshCompletionDir(), "_mytool")
+	managedBashLink := filepath.Join(dirs.BashCompletionDir(), "mytool.bash")
+	for _, pair := range [][2]string{
+		{toolBin, managedOldLink},
+		{newBin, managedNewLink},
+		{manSrc, managedManLink},
+		{compSrc, managedZshLink},
+		{bashCompSrc, managedBashLink},
+	} {
+		if err := os.Symlink(pair[0], pair[1]); err != nil {
+			t.Fatalf("symlink %s -> %s: %v", pair[1], pair[0], err)
+		}
+	}
+
+	// Symlink to unrelated target (should be preserved).
+	preservedLink := filepath.Join(dirs.BinDir(), "unrelated")
+	if err := os.Symlink(otherBin, preservedLink); err != nil {
+		t.Fatalf("symlink unrelated: %v", err)
+	}
+
+	// Plain file in BinDir (user's own binary; should be preserved).
+	userFile := filepath.Join(dirs.BinDir(), "user-owned")
+	if err := os.WriteFile(userFile, []byte("x"), 0o755); err != nil {
+		t.Fatalf("write user file: %v", err)
+	}
+
+	mgr.removeToolSymlinks(name)
+
+	// Managed links should be gone.
+	for _, p := range []string{managedOldLink, managedNewLink, managedManLink, managedZshLink, managedBashLink} {
+		if _, err := os.Lstat(p); !os.IsNotExist(err) {
+			t.Errorf("expected %s removed, got err=%v", p, err)
+		}
+	}
+	// Unrelated link and user file must remain.
+	if _, err := os.Lstat(preservedLink); err != nil {
+		t.Errorf("expected %s preserved, got err=%v", preservedLink, err)
+	}
+	if _, err := os.Lstat(userFile); err != nil {
+		t.Errorf("expected %s preserved, got err=%v", userFile, err)
+	}
+}
+
+func TestRemoveToolSymlinksRelativeTarget(t *testing.T) {
+	root := t.TempDir()
+	dirs := paths.Dirs{
+		Config: filepath.Join(root, "config"),
+		Data:   filepath.Join(root, "data"),
+		State:  filepath.Join(root, "state"),
+		Cache:  filepath.Join(root, "cache"),
+	}
+	if err := dirs.EnsureDirs(); err != nil {
+		t.Fatalf("EnsureDirs: %v", err)
+	}
+	mgr := NewManager(dirs)
+
+	name := "reltool"
+	toolDir := dirs.ToolDir(name)
+	if err := os.MkdirAll(toolDir, 0o755); err != nil {
+		t.Fatalf("mkdir tool: %v", err)
+	}
+	target := filepath.Join(toolDir, "reltool")
+	if err := os.WriteFile(target, []byte("x"), 0o755); err != nil {
+		t.Fatalf("write target: %v", err)
+	}
+
+	link := filepath.Join(dirs.BinDir(), "reltool")
+	rel, err := filepath.Rel(dirs.BinDir(), target)
+	if err != nil {
+		t.Fatalf("rel: %v", err)
+	}
+	if err := os.Symlink(rel, link); err != nil {
+		t.Fatalf("symlink: %v", err)
+	}
+
+	mgr.removeToolSymlinks(name)
+
+	if _, err := os.Lstat(link); !os.IsNotExist(err) {
+		t.Errorf("expected %s removed (relative symlink into tool dir), got err=%v", link, err)
+	}
+}
+
+func TestInstalledStateRoundTrip(t *testing.T) {
+	root := t.TempDir()
+	dirs := paths.Dirs{
+		Config: filepath.Join(root, "config"),
+		Data:   filepath.Join(root, "data"),
+		State:  filepath.Join(root, "state"),
+		Cache:  filepath.Join(root, "cache"),
+	}
+	if err := dirs.EnsureDirs(); err != nil {
+		t.Fatalf("EnsureDirs: %v", err)
+	}
+	mgr := NewManager(dirs)
+
+	in := InstalledState{
+		Repo:        "owner/widget",
+		Tag:         "v1.2.3",
+		Pattern:     "widget-darwin-arm64.tar.gz",
+		Bin:         []string{"widget"},
+		Man:         []string{"man/widget.1"},
+		Completions: []string{"completions/_widget"},
+		InstalledAt: "2026-04-17T12:00:00Z",
+	}
+	if err := mgr.writeState("widget", in); err != nil {
+		t.Fatalf("writeState: %v", err)
+	}
+	got := mgr.ReadState("widget")
+	if got == nil {
+		t.Fatalf("ReadState returned nil")
+	}
+	if !reflect.DeepEqual(*got, in) {
+		t.Errorf("round-trip mismatch:\n got=%#v\nwant=%#v", *got, in)
+	}
+}
+
+func TestListInstalled(t *testing.T) {
+	root := t.TempDir()
+	dirs := paths.Dirs{
+		Config: filepath.Join(root, "config"),
+		Data:   filepath.Join(root, "data"),
+		State:  filepath.Join(root, "state"),
+		Cache:  filepath.Join(root, "cache"),
+	}
+	if err := dirs.EnsureDirs(); err != nil {
+		t.Fatalf("EnsureDirs: %v", err)
+	}
+	mgr := NewManager(dirs)
+
+	for _, s := range []InstalledState{
+		{Repo: "z/zoo", Tag: "v1"},
+		{Repo: "a/apple", Tag: "v2"},
+		{Repo: "m/mango", Tag: "v3"},
+	} {
+		name := s.Repo
+		// derive name from repo's "/" suffix the way Manager does internally
+		for i := 0; i < len(s.Repo); i++ {
+			if s.Repo[i] == '/' {
+				name = s.Repo[i+1:]
+				break
+			}
+		}
+		if err := mgr.writeState(name, s); err != nil {
+			t.Fatalf("writeState %s: %v", name, err)
+		}
+	}
+
+	// A non-state file in the state dir should be ignored.
+	if err := os.WriteFile(filepath.Join(dirs.State, "README"), []byte("hi"), 0o644); err != nil {
+		t.Fatalf("write README: %v", err)
+	}
+
+	got, err := mgr.ListInstalled()
+	if err != nil {
+		t.Fatalf("ListInstalled: %v", err)
+	}
+	if len(got) != 3 {
+		t.Fatalf("expected 3 states, got %d", len(got))
+	}
+	wantOrder := []string{"a/apple", "m/mango", "z/zoo"}
+	for i, w := range wantOrder {
+		if got[i].Repo != w {
+			t.Errorf("position %d: got %q, want %q", i, got[i].Repo, w)
+		}
+	}
+}
+
+func TestListInstalledEmpty(t *testing.T) {
+	root := t.TempDir()
+	dirs := paths.Dirs{State: filepath.Join(root, "state")}
+	mgr := NewManager(dirs)
+	got, err := mgr.ListInstalled()
+	if err != nil {
+		t.Fatalf("ListInstalled: %v", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("expected 0, got %d", len(got))
+	}
+}
+
+func TestBackfillState(t *testing.T) {
+	state := &InstalledState{
+		Repo: "owner/widget",
+		Tag:  "v1",
+	}
+	manifest := &config.Tool{
+		Repo:        "owner/widget",
+		Pattern:     "widget-{{os}}-{{arch}}.tar.gz",
+		Bin:         []string{"widget"},
+		Man:         []string{"man/widget.1"},
+		Completions: []string{"_widget"},
+	}
+	BackfillState(state, manifest)
+
+	if !reflect.DeepEqual(state.Bin, manifest.Bin) {
+		t.Errorf("Bin not backfilled")
+	}
+	if !reflect.DeepEqual(state.Man, manifest.Man) {
+		t.Errorf("Man not backfilled")
+	}
+	if !reflect.DeepEqual(state.Completions, manifest.Completions) {
+		t.Errorf("Completions not backfilled")
+	}
+}
+
+func TestBackfillStatePreservesExisting(t *testing.T) {
+	state := &InstalledState{
+		Repo: "owner/widget",
+		Bin:  []string{"kept-bin"},
+	}
+	manifest := &config.Tool{
+		Repo: "owner/widget",
+		Bin:  []string{"ignored"},
+		Man:  []string{"filled-in"},
+	}
+	BackfillState(state, manifest)
+	if !reflect.DeepEqual(state.Bin, []string{"kept-bin"}) {
+		t.Errorf("Bin overwritten: %v", state.Bin)
+	}
+	if !reflect.DeepEqual(state.Man, []string{"filled-in"}) {
+		t.Errorf("Man not backfilled when empty: %v", state.Man)
+	}
+}
+
+func TestInstalledStateAsTool(t *testing.T) {
+	s := InstalledState{
+		Repo:    "owner/widget",
+		Tag:     "v1",
+		Pattern: "widget-darwin-arm64.tar.gz",
+		Bin:     []string{"widget"},
+	}
+	got := s.AsTool()
+	if got.Repo != s.Repo || got.Tag != s.Tag || got.Pattern != s.Pattern {
+		t.Errorf("AsTool mismatch: %#v", got)
+	}
+	if !reflect.DeepEqual(got.Bin, s.Bin) {
+		t.Errorf("AsTool.Bin mismatch")
+	}
+}
+
+
 func TestParseBinSpec(t *testing.T) {
 	tests := []struct {
 		spec       string
@@ -159,8 +449,8 @@ func TestParseBinSpec(t *testing.T) {
 		{"jq-macos-arm64:jq", "jq-macos-arm64", "jq"},
 		{"yq_darwin_arm64:yq", "yq_darwin_arm64", "yq"},
 		{"bin/tool:tool", "bin/tool", "tool"},
-		{":bad", ":bad", ":bad"},       // leading colon, no valid split
-		{"bad:", "bad:", "bad:"},         // trailing colon, no valid split
+		{":bad", ":bad", ":bad"},
+		{"bad:", "bad:", "bad:"},
 	}
 	for _, tt := range tests {
 		src, link := parseBinSpec(tt.spec)

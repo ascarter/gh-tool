@@ -16,7 +16,10 @@ var upgradeCmd = &cobra.Command{
 	Short: "Upgrade installed tools to the latest release",
 	Long: `Upgrade installed tools to the latest release.
 
-With no arguments, upgrades all tools in the manifest.
+Drives off the local install state under $XDG_STATE_HOME/gh-tool/. The
+manifest is not consulted.
+
+With no arguments, upgrades all installed tools.
 With an argument, upgrades only the specified tool.`,
 	RunE: runUpgrade,
 }
@@ -29,28 +32,39 @@ func runUpgrade(cmd *cobra.Command, args []string) error {
 	dirs := resolveDirs()
 	mgr := tool.NewManager(dirs)
 
-	cfg, err := config.Load(dirs.ConfigFile())
-	if err != nil {
-		return err
-	}
-
-	var tools []config.Tool
+	var states []tool.InstalledState
 	if len(args) > 0 {
-		t := cfg.FindTool(args[0])
-		if t == nil {
-			return fmt.Errorf("tool %s not found in manifest", args[0])
+		repo := args[0]
+		for _, s := range mustListInstalled(mgr) {
+			if s.Repo == repo {
+				states = append(states, s)
+				break
+			}
 		}
-		tools = append(tools, *t)
+		if len(states) == 0 {
+			return fmt.Errorf("tool %s is not installed", repo)
+		}
 	} else {
-		tools = cfg.Tools
+		var err error
+		states, err = mgr.ListInstalled()
+		if err != nil {
+			return err
+		}
 	}
 
-	if len(tools) == 0 {
-		fmt.Println("No tools in manifest.")
+	if len(states) == 0 {
+		fmt.Println("No tools installed.")
 		return nil
 	}
 
-	for _, t := range tools {
+	// Best-effort manifest load for backfilling pre-migration state files.
+	cfg, _ := config.Load(dirs.ConfigFile())
+
+	for _, s := range states {
+		if cfg != nil {
+			tool.BackfillState(&s, cfg.FindTool(s.Repo))
+		}
+		t := s.AsTool()
 		name := t.Name()
 
 		if !t.ShouldInstallOn(runtime.GOOS) {
@@ -58,25 +72,20 @@ func runUpgrade(cmd *cobra.Command, args []string) error {
 			continue
 		}
 
-		state := mgr.ReadState(name)
-
 		latest, err := tool.LatestTag(t.Repo)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "✗ %s: could not check latest release: %s\n", t.Repo, err)
 			continue
 		}
 
-		if state != nil && state.Tag == latest {
+		if s.Tag == latest {
 			fmt.Printf("· %s already at %s\n", name, latest)
 			continue
 		}
 
-		// Override tag to latest for the upgrade
-		upgradeT := t
-		upgradeT.Tag = ""
-		upgradeT.Pattern = upgradeT.ResolvePattern(runtime.GOOS, runtime.GOARCH)
-		upgradeT.Pattern = tool.ExpandPattern(upgradeT.Pattern)
-		if err := mgr.Install(upgradeT, true); err != nil {
+		// Force tag to latest.
+		t.Tag = ""
+		if err := mgr.Install(t, true); err != nil {
 			fmt.Fprintf(os.Stderr, "✗ %s: %s\n", t.Repo, err)
 		}
 	}

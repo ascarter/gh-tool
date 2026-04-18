@@ -17,7 +17,12 @@ var installCmd = &cobra.Command{
 	Long: `Install a tool from a GitHub release. Downloads the release asset,
 extracts it, and creates symlinks for binaries, man pages, and completions.
 
-With no arguments, installs all tools defined in the manifest.`,
+With no arguments, reconciles the local install set against the manifest:
+installs anything missing, leaves up-to-date tools alone, and (with --force)
+reinstalls everything.
+
+The manifest is treated as a read-only input. Pass --save to record the
+resulting tool spec into the manifest after a single-tool install.`,
 	RunE: runInstall,
 }
 
@@ -28,6 +33,9 @@ var (
 	flagMan      []string
 	flagComp     []string
 	flagNoVerify bool
+	flagForce    bool
+	flagFile     string
+	flagSave     bool
 )
 
 func init() {
@@ -37,21 +45,36 @@ func init() {
 	installCmd.Flags().StringSliceVar(&flagMan, "man", nil, "man page path(s) relative to extracted archive")
 	installCmd.Flags().StringSliceVar(&flagComp, "completion", nil, "completion file path(s) relative to extracted archive")
 	installCmd.Flags().BoolVar(&flagNoVerify, "no-verify", false, "skip attestation verification")
+	installCmd.Flags().BoolVar(&flagForce, "force", false, "reinstall even if up-to-date, clearing stale symlinks and cache")
+	installCmd.Flags().StringVarP(&flagFile, "file", "f", "", "path to manifest file (default: $XDG_CONFIG_HOME/gh-tool/config.toml)")
+	installCmd.Flags().BoolVar(&flagSave, "save", false, "record the resulting tool spec into the manifest")
+}
+
+// manifestPath returns the manifest path honoring --file, falling back to the
+// XDG default.
+func manifestPath(dirs interface {
+	ConfigFile() string
+}) string {
+	if flagFile != "" {
+		return flagFile
+	}
+	return dirs.ConfigFile()
 }
 
 func runInstall(cmd *cobra.Command, args []string) error {
 	dirs := resolveDirs()
 	mgr := tool.NewManager(dirs)
+	mfPath := manifestPath(dirs)
 
-	cfg, err := config.Load(dirs.ConfigFile())
+	cfg, err := config.Load(mfPath)
 	if err != nil {
 		return err
 	}
 
-	// No args: install everything in the manifest
+	// No args: reconcile from manifest.
 	if len(args) == 0 {
 		if len(cfg.Tools) == 0 {
-			fmt.Println("No tools in manifest. Use: gh tool install <owner/repo> --pattern <pattern>")
+			fmt.Println("No tools in manifest. Use: gh tool install <owner/repo> --pattern <pattern> [--save]")
 			return nil
 		}
 		verify := !flagNoVerify
@@ -60,9 +83,9 @@ func runInstall(cmd *cobra.Command, args []string) error {
 				fmt.Printf("· %s skipped on %s\n", t.Name(), runtime.GOOS)
 				continue
 			}
-			t.Pattern = t.ResolvePattern(runtime.GOOS, runtime.GOARCH)
-			t.Pattern = tool.ExpandPattern(t.Pattern)
-			if isUpToDate(mgr, t) {
+			if flagForce {
+				mgr.CleanupInstall(t.Name())
+			} else if isUpToDate(mgr, t) {
 				continue
 			}
 			if err := mgr.Install(t, verify); err != nil {
@@ -74,13 +97,15 @@ func runInstall(cmd *cobra.Command, args []string) error {
 
 	repo := args[0]
 
-	// Build tool config from flags, merging with existing manifest entry
+	// Build tool config from flags, optionally seeded by manifest entry.
 	t := config.Tool{Repo: repo}
-	if existing := cfg.FindTool(repo); existing != nil {
-		t = *existing
+	manifestEntry := cfg.FindTool(repo)
+
+	if manifestEntry != nil {
+		t = *manifestEntry
 	}
 
-	// CLI flags override manifest values
+	// CLI flags override manifest values.
 	if flagPattern != "" {
 		t.Pattern = flagPattern
 	}
@@ -98,31 +123,41 @@ func runInstall(cmd *cobra.Command, args []string) error {
 	}
 
 	if t.Pattern == "" && len(t.Patterns) == 0 {
+		if manifestEntry == nil {
+			return fmt.Errorf("no manifest entry for %s; supply --pattern or add it to %s", repo, mfPath)
+		}
 		return fmt.Errorf("--pattern is required (which release asset to download)")
 	}
 
-	// Preserve original config for manifest (before pattern expansion)
-	manifestTool := t
-
-	// Resolve platform-specific pattern, then expand template variables
-	t.Pattern = t.ResolvePattern(runtime.GOOS, runtime.GOARCH)
-	t.Pattern = tool.ExpandPattern(t.Pattern)
-
-	// Skip if already installed and up-to-date
-	if isUpToDate(mgr, t) {
-		// Still update manifest in case flags changed other fields
-		cfg.AddOrUpdateTool(manifestTool)
-		return config.Save(dirs.ConfigFile(), cfg)
+	if flagForce {
+		mgr.CleanupInstall(t.Name())
+	} else if isUpToDate(mgr, t) {
+		// Even when up-to-date, --save should still persist the spec.
+		if flagSave {
+			return saveManifestEntry(mfPath, cfg, t)
+		}
+		return nil
 	}
 
-	// Install the tool
 	if err := mgr.Install(t, !flagNoVerify); err != nil {
 		return err
 	}
 
-	// Update manifest with original (unexpanded) config
-	cfg.AddOrUpdateTool(manifestTool)
-	return config.Save(dirs.ConfigFile(), cfg)
+	if flagSave {
+		return saveManifestEntry(mfPath, cfg, t)
+	}
+	return nil
+}
+
+// saveManifestEntry writes (or updates) the tool entry into the manifest at
+// mfPath. cfg is the manifest already loaded from that path.
+func saveManifestEntry(mfPath string, cfg *config.Config, t config.Tool) error {
+	cfg.AddOrUpdateTool(t)
+	if err := config.Save(mfPath, cfg); err != nil {
+		return fmt.Errorf("saving manifest: %w", err)
+	}
+	fmt.Printf("✓ Saved %s to %s\n", t.Repo, mfPath)
+	return nil
 }
 
 // isUpToDate checks whether a tool is already installed at the target version.

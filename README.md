@@ -54,6 +54,8 @@ eval "$(gh tool shell zsh)"
 
 Declare tools in `$XDG_CONFIG_HOME/gh-tool/config.toml` (typically `~/.config/gh-tool/config.toml`). This file is designed to be checked into a dotfiles repo.
 
+The manifest is a **read-only input** — like a Brewfile. `gh tool install` reads it; nothing writes to it unless you pass `--save`. The local install set is tracked separately in per-tool state files under `$XDG_STATE_HOME/gh-tool/`.
+
 ```toml
 [[tool]]
 repo = "junegunn/fzf"
@@ -84,11 +86,42 @@ pattern = "yq_{{os}}_{{arch}}.tar.gz"
 bin = ["yq_darwin_arm64:yq"]
 ```
 
-Install all tools from the manifest at once:
+Reconcile the local install set against the manifest at any time:
 
 ```sh
-gh tool install
+gh tool install                  # install anything missing; leave up-to-date tools alone
+gh tool install --force          # rebuild every manifest tool from scratch
+gh tool install junegunn/fzf     # install (or reinstall) just one tool from the manifest
 ```
+
+After editing the manifest, use `--force` to apply spec changes (renamed `bin`, swapped `pattern`, etc.) — it clears stale symlinks and the cached download before reinstalling. `gh tool list` will flag changed-but-not-reapplied entries as `drift`.
+
+### Using an alternate manifest
+
+`--file` / `-f` points `install` at a manifest other than the default:
+
+```sh
+gh tool install --file ./tools.toml
+gh tool install -f ./laptop.toml --force
+```
+
+State always lives under `$XDG_STATE_HOME/gh-tool/` regardless of which manifest you load.
+
+### Recording an ad-hoc install
+
+Without a manifest entry you can still install one-off:
+
+```sh
+gh tool install junegunn/fzf --pattern 'fzf-*-{{os}}_{{arch}}.tar.gz' --bin fzf
+```
+
+By default this does not modify the manifest — the install only shows up in `gh tool list` (as `orphan` until you add it). Add `--save` to record the resulting spec in the manifest:
+
+```sh
+gh tool install junegunn/fzf --pattern 'fzf-*-{{os}}_{{arch}}.tar.gz' --save
+```
+
+Note: `--save` reformats the manifest (TOML comments and key ordering are not preserved). Editing the manifest by hand is the recommended workflow for most users.
 
 ### Tool Attributes
 
@@ -172,15 +205,28 @@ Values are Go-style OS names: `darwin`, `linux`, `windows`. If `os` is omitted, 
 ## Commands
 
 ```
-gh tool install [owner/repo]    Install a tool or resolve the full manifest
-gh tool remove <owner/repo>     Remove an installed tool
-gh tool list                    List installed tools with update status
-gh tool upgrade [owner/repo]    Upgrade to latest release
+gh tool install [owner/repo]    Reconcile from manifest, or install a single tool
+gh tool remove <owner/repo>     Remove an installed tool (manifest is not modified)
+gh tool list                    List installed tools and any drift from the manifest
+gh tool upgrade [owner/repo]    Upgrade to latest release (state-driven)
 gh tool cache list              Show cached downloads
 gh tool cache clean [tool]      Remove cached downloads
 gh tool shell <bash|zsh>        Print shell integration config
 gh tool version                 Print version
 ```
+
+`install` flags: `--pattern/-p`, `--tag/-t`, `--bin`, `--man`, `--completion`, `--no-verify`, `--force`, `--file/-f`, `--save`.
+
+### List status values
+
+| Status             | Meaning |
+|--------------------|---------|
+| `up to date`       | Installed, on the latest release, matches the manifest spec |
+| `update available` | Installed, but a newer release exists |
+| `drift`            | Installed spec differs from the manifest spec — run `gh tool install --force` |
+| `orphan`           | Installed but not in the manifest |
+| `pending`          | In the manifest but not installed |
+| `skipped (os)`     | In the manifest, filtered out by `os` on this platform |
 
 ## How It Works
 
@@ -188,7 +234,18 @@ gh tool version                 Print version
 2. The asset is verified with `gh attestation verify` (best-effort — most repos don't publish attestations yet)
 3. Archives (tar.gz, tar.xz, zip) are extracted; bare binaries are copied directly. If an archive has a single top-level directory, it is stripped automatically
 4. Symlinks are created from `$XDG_DATA_HOME/gh-tool/bin/` into the extracted tool directory. Use `source:link` in `bin` to rename binaries (e.g., `jq-macos-arm64:jq`)
-5. The tool is recorded in the manifest and a state file tracks the installed version
+5. A state file under `$XDG_STATE_HOME/gh-tool/<name>.toml` records the installed tag, the resolved download pattern, and the symlinked `bin`/`man`/`completions`. `list`, `remove`, and `upgrade` operate from these state files; the manifest is only consulted by `install` (and by `list` for drift reporting).
+
+## Migration
+
+If you are upgrading from an earlier version of gh-tool, run this once to
+refresh state files into the new schema (which now also records the
+symlinked `bin`/`man`/`completions` so list/upgrade/remove no longer need
+to consult the manifest):
+
+```sh
+gh tool install --force
+```
 
 ## Filesystem Layout
 
