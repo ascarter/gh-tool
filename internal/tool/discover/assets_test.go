@@ -96,3 +96,34 @@ func TestIsSkippable(t *testing.T) {
 		}
 	}
 }
+
+func TestPreferArchives(t *testing.T) {
+// yq ships both a bare binary and a tar.gz per platform; we should
+// keep only the archive in ByPlatform.
+in := []Asset{
+{Name: "yq_linux_amd64"},
+{Name: "yq_linux_amd64.tar.gz"},
+}
+out := preferArchives(in)
+if len(out) != 1 || out[0].Name != "yq_linux_amd64.tar.gz" {
+t.Errorf("preferArchives = %+v, want only the tar.gz", out)
+}
+
+// Two archives with the same stem (different ext): keep both — user
+// can pick. We don't try to rank archive formats.
+in = []Asset{
+{Name: "yq_linux_amd64.tar.gz"},
+{Name: "yq_linux_amd64.zip"},
+}
+out = preferArchives(in)
+if len(out) != 2 {
+t.Errorf("preferArchives stripped distinct archives: %+v", out)
+}
+
+// No archive present → keep the bare binary.
+in = []Asset{{Name: "fnm-linux"}}
+out = preferArchives(in)
+if len(out) != 1 {
+t.Errorf("preferArchives dropped lone bare binary: %+v", out)
+}
+}

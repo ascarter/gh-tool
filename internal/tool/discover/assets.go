@@ -94,7 +94,57 @@ func FetchRelease(repo, tag string) (*Release, error) {
 		rel.All = append(rel.All, a)
 		rel.ByPlatform[key] = append(rel.ByPlatform[key], a)
 	}
+	// Drop bare-binary assets that duplicate an archived sibling with the
+	// same base name (e.g. yq ships both yq_linux_amd64 and
+	// yq_linux_amd64.tar.gz). The archive is the canonical pick — it's
+	// what 'gh tool add' inspects for binaries/man/completions and the
+	// bare binary lives inside.
+	for k, list := range rel.ByPlatform {
+		rel.ByPlatform[k] = preferArchives(list)
+	}
 	return rel, nil
+}
+
+// preferArchives drops bare-binary assets when an archived sibling with
+// the same stem (asset name minus archive extension) is also present.
+func preferArchives(list []Asset) []Asset {
+	if len(list) < 2 {
+		return list
+	}
+	stems := map[string]bool{}
+	for _, a := range list {
+		if stem, ok := archiveStem(a.Name); ok {
+			stems[stem] = true
+		}
+	}
+	if len(stems) == 0 {
+		return list
+	}
+	out := make([]Asset, 0, len(list))
+	for _, a := range list {
+		if _, isArchive := archiveStem(a.Name); isArchive {
+			out = append(out, a)
+			continue
+		}
+		if stems[a.Name] {
+			// This bare asset is shadowed by an archived sibling.
+			continue
+		}
+		out = append(out, a)
+	}
+	return out
+}
+
+// archiveStem returns the asset name with a recognized archive extension
+// removed and ok=true when the asset is an archive.
+func archiveStem(name string) (string, bool) {
+	low := strings.ToLower(name)
+	for _, ext := range []string{".tar.gz", ".tar.xz", ".tar.bz2", ".tar.zst", ".tgz", ".txz", ".tbz2", ".zip"} {
+		if strings.HasSuffix(low, ext) {
+			return name[:len(name)-len(ext)], true
+		}
+	}
+	return "", false
 }
 
 // Platforms returns the list of detected platforms, sorted.
