@@ -60,23 +60,24 @@ func NewManager(dirs paths.Dirs) *Manager {
 // variables (including {{tag}} once the latest tag is known), and installs.
 // If verify is true, attempts attestation verification on the downloaded asset.
 func (m *Manager) Install(t config.Tool, verify bool) error {
-	assetPath, tag, err := m.DownloadAsset(t)
+	assetPath, tag, resolvedPattern, err := m.DownloadAsset(t)
 	if err != nil {
 		return err
 	}
-	return m.InstallFromAsset(t, assetPath, tag, verify)
+	return m.installFromAsset(t, assetPath, tag, resolvedPattern, verify)
 }
 
 // DownloadAsset resolves the platform-specific pattern, resolves the latest
 // tag (if not pinned), and downloads the matching release asset to the cache.
 // The cache directory is cleared before download so subsequent calls (e.g.
 // findDownloadedAsset) cannot pick up stale files. Returns the local path of
-// the downloaded asset and the tag actually downloaded.
-func (m *Manager) DownloadAsset(t config.Tool) (assetPath, tag string, err error) {
+// the downloaded asset, the tag actually downloaded, and the resolved+
+// expanded pattern used for the download.
+func (m *Manager) DownloadAsset(t config.Tool) (assetPath, tag, resolvedPattern string, err error) {
 	name := t.Name()
 
 	if err := m.Dirs.EnsureDirs(); err != nil {
-		return "", "", fmt.Errorf("creating directories: %w", err)
+		return "", "", "", fmt.Errorf("creating directories: %w", err)
 	}
 
 	// Resolve tag first so {{tag}} works in patterns.
@@ -84,43 +85,50 @@ func (m *Manager) DownloadAsset(t config.Tool) (assetPath, tag string, err error
 	if tag == "" || tag == "latest" {
 		resolved, resolveErr := resolveLatestTag(t.Repo)
 		if resolveErr != nil {
-			return "", "", fmt.Errorf("resolving latest tag for %s: %w", t.Repo, resolveErr)
+			return "", "", "", fmt.Errorf("resolving latest tag for %s: %w", t.Repo, resolveErr)
 		}
 		tag = resolved
 	}
 
 	rawPattern := t.ResolvePattern(runtime.GOOS, runtime.GOARCH)
 	if rawPattern == "" {
-		return "", "", fmt.Errorf("%s: no pattern for %s/%s (unsupported on this platform)", t.Repo, runtime.GOOS, runtime.GOARCH)
+		return "", "", "", fmt.Errorf("%s: no pattern for %s/%s (unsupported on this platform)", t.Repo, runtime.GOOS, runtime.GOARCH)
 	}
-	resolvedPattern := ExpandPattern(rawPattern, tag)
+	resolvedPattern = ExpandPattern(rawPattern, tag)
 
 	cacheDir := m.Dirs.CacheDir(name)
 	// Clear the cache dir so findDownloadedAsset cannot pick up a stale
 	// asset from a previous install/inspection.
 	_ = os.RemoveAll(cacheDir)
 	if err := os.MkdirAll(cacheDir, 0o755); err != nil {
-		return "", "", fmt.Errorf("creating cache dir: %w", err)
+		return "", "", "", fmt.Errorf("creating cache dir: %w", err)
 	}
 
 	args := []string{"release", "download", tag, "-R", t.Repo, "-D", cacheDir, "-p", resolvedPattern, "--clobber"}
 
 	fmt.Printf("Downloading %s %s...\n", t.Repo, tag)
 	if _, _, err := gh.Exec(args...); err != nil {
-		return "", "", fmt.Errorf("downloading release: %w", err)
+		return "", "", "", fmt.Errorf("downloading release: %w", err)
 	}
 
 	assetPath, err = findDownloadedAsset(cacheDir)
 	if err != nil {
-		return "", "", err
+		return "", "", "", err
 	}
-	return assetPath, tag, nil
+	return assetPath, tag, resolvedPattern, nil
 }
 
 // InstallFromAsset installs a tool from an already-downloaded asset. Performs
 // optional attestation verification, extracts the archive into the tool dir,
-// creates symlinks, and writes the per-machine state file.
+// creates symlinks, and writes the per-machine state file. The resolved
+// pattern is recomputed for the host platform so callers without one in
+// hand still work.
 func (m *Manager) InstallFromAsset(t config.Tool, assetPath, tag string, verify bool) error {
+	resolvedPattern := ExpandPattern(t.ResolvePattern(runtime.GOOS, runtime.GOARCH), tag)
+	return m.installFromAsset(t, assetPath, tag, resolvedPattern, verify)
+}
+
+func (m *Manager) installFromAsset(t config.Tool, assetPath, tag, resolvedPattern string, verify bool) error {
 	name := t.Name()
 
 	if verify {
@@ -140,7 +148,6 @@ func (m *Manager) InstallFromAsset(t config.Tool, assetPath, tag string, verify 
 		return fmt.Errorf("creating symlinks: %w", err)
 	}
 
-	resolvedPattern := ExpandPattern(t.ResolvePattern(runtime.GOOS, runtime.GOARCH), tag)
 	state := InstalledState{
 		Repo:        t.Repo,
 		Tag:         tag,
@@ -286,7 +293,9 @@ func (m *Manager) createSymlinks(t config.Tool, tag, toolDir string) error {
 			continue
 		}
 		dst := filepath.Join(m.Dirs.ManDir(), filepath.Base(man))
-		_ = forceSymlink(src, dst)
+		if err := forceSymlink(src, dst); err != nil {
+			fmt.Printf("  warning: man page %q: %s\n", man, err)
+		}
 	}
 
 	// Completion symlinks. Route by extension/prefix:
@@ -320,7 +329,9 @@ func (m *Manager) createSymlinks(t config.Tool, tag, toolDir string) error {
 		default:
 			dst = filepath.Join(m.Dirs.BashCompletionDir(), base)
 		}
-		_ = forceSymlink(src, dst)
+		if err := forceSymlink(src, dst); err != nil {
+			fmt.Printf("  warning: completion %q: %s\n", comp, err)
+		}
 	}
 
 	return nil
@@ -328,15 +339,7 @@ func (m *Manager) createSymlinks(t config.Tool, tag, toolDir string) error {
 
 func (m *Manager) removeToolSymlinks(name string) {
 	toolDir := m.Dirs.ToolDir(name)
-	dirs := []string{
-		m.Dirs.BinDir(),
-		m.Dirs.ManDir(),
-		m.Dirs.ZshCompletionDir(),
-		m.Dirs.BashCompletionDir(),
-		m.Dirs.FishCompletionDir(),
-		m.Dirs.PwshCompletionDir(),
-	}
-	for _, dir := range dirs {
+	for _, dir := range m.Dirs.SymlinkDirs() {
 		entries, err := os.ReadDir(dir)
 		if err != nil {
 			continue

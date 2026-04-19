@@ -192,3 +192,27 @@ t.Errorf("expected yq_linux_someunknownarch.tar.gz in skipped, got %+v", skipped
 }
 })
 }
+
+func TestStripArchiveExt(t *testing.T) {
+tests := []struct {
+in, want string
+}{
+{"tool-linux-amd64.tar.gz", "tool-linux-amd64"},
+{"tool-linux-amd64.tar.xz", "tool-linux-amd64"},
+{"Tool.TAR.GZ", "Tool"},
+{"tool-1.0.zip", "tool-1.0"},
+{"tool.tgz", "tool"},
+{"tool.txz", "tool"},
+{"tool.tar.bz2", "tool"},
+{"tool.tbz2", "tool"},
+{"tool.tar.zst", "tool"},
+{"tool", "tool"},
+{"tool.gz", "tool.gz"},  // bare .gz not recognized
+{"jq-macos-arm64", "jq-macos-arm64"},
+}
+for _, tt := range tests {
+if got := StripArchiveExt(tt.in); got != tt.want {
+t.Errorf("StripArchiveExt(%q)=%q want %q", tt.in, got, tt.want)
+}
+}
+}

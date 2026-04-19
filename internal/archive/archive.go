@@ -36,8 +36,6 @@ func Extract(archivePath, destDir string) error {
 }
 
 func extractTarGz(archivePath, destDir string) error {
-	prefix := detectTarPrefix(archivePath)
-
 	f, err := os.Open(archivePath)
 	if err != nil {
 		return err
@@ -50,6 +48,7 @@ func extractTarGz(archivePath, destDir string) error {
 	}
 	defer gz.Close()
 
+	prefix := detectTarPrefix(archivePath)
 	return extractTar(gz, destDir, prefix)
 }
 
@@ -72,20 +71,18 @@ func extractTarXz(archivePath, destDir string) error {
 	}
 	defer os.Remove(tarPath)
 
-	// Detect prefix from the decompressed tar
-	prefix := detectTarPrefixFromFile(tarPath)
-
-	// Extract the tar
 	f, err := os.Open(tarPath)
 	if err != nil {
 		return err
 	}
 	defer f.Close()
 
+	prefix := detectTarPrefixFromReader(f)
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		return err
+	}
 	return extractTar(f, destDir, prefix)
-}
-
-// extractTar reads tar entries from r and writes them to destDir, stripping prefix.
+}// extractTar reads tar entries from r and writes them to destDir, stripping prefix.
 func extractTar(r io.Reader, destDir, prefix string) error {
 	tr := tar.NewReader(r)
 	for {
@@ -137,15 +134,6 @@ func extractTar(r io.Reader, destDir, prefix string) error {
 	return nil
 }
 
-func detectTarPrefixFromFile(tarPath string) string {
-	f, err := os.Open(tarPath)
-	if err != nil {
-		return ""
-	}
-	defer f.Close()
-	return detectTarPrefixFromReader(f)
-}
-
 func detectTarPrefixFromReader(r io.Reader) string {
 	tr := tar.NewReader(r)
 	topDirs := make(map[string]bool)
@@ -167,6 +155,8 @@ func detectTarPrefixFromReader(r io.Reader) string {
 	return ""
 }
 
+// detectTarPrefix returns the leading directory shared by all entries in a
+// tar.gz archive, or "" when there is no single common prefix.
 func detectTarPrefix(archivePath string) string {
 	f, err := os.Open(archivePath)
 	if err != nil {

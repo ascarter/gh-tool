@@ -30,7 +30,11 @@ func runRemove(cmd *cobra.Command, args []string) error {
 	// Resolve tool name. Prefer state (handles repos installed via flags
 	// without a manifest entry); fall back to the repo arg shape.
 	t := config.Tool{Repo: repo}
-	for _, s := range mustListInstalled(mgr) {
+	states, err := mgr.ListInstalled()
+	if err != nil {
+		return fmt.Errorf("listing installed tools: %w", err)
+	}
+	for _, s := range states {
 		if s.Repo == repo {
 			t = s.AsTool()
 			break
@@ -50,9 +54,4 @@ func runRemove(cmd *cobra.Command, args []string) error {
 	}
 
 	return nil
-}
-
-func mustListInstalled(mgr *tool.Manager) []tool.InstalledState {
-	states, _ := mgr.ListInstalled()
-	return states
 }

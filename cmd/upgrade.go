@@ -33,9 +33,13 @@ func runUpgrade(cmd *cobra.Command, args []string) error {
 	mgr := tool.NewManager(dirs)
 
 	var states []tool.InstalledState
+	all, err := mgr.ListInstalled()
+	if err != nil {
+		return fmt.Errorf("listing installed tools: %w", err)
+	}
 	if len(args) > 0 {
 		repo := args[0]
-		for _, s := range mustListInstalled(mgr) {
+		for _, s := range all {
 			if s.Repo == repo {
 				states = append(states, s)
 				break
@@ -45,11 +49,7 @@ func runUpgrade(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("tool %s is not installed", repo)
 		}
 	} else {
-		var err error
-		states, err = mgr.ListInstalled()
-		if err != nil {
-			return err
-		}
+		states = all
 	}
 
 	if len(states) == 0 {

@@ -1,9 +1,9 @@
 package paths
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 )
 
 const appName = "gh-tool"
@@ -82,21 +82,25 @@ func (d Dirs) ConfigFile() string {
 	return filepath.Join(d.Config, "config.toml")
 }
 
-// EnsureDirs creates all required directories if they don't exist.
-func (d Dirs) EnsureDirs() error {
-	dirs := []string{
-		d.Config,
+// SymlinkDirs returns every directory into which gh-tool installs symlinks:
+// the bin dir, the man dir, and one dir per supported completion shell.
+func (d Dirs) SymlinkDirs() []string {
+	return []string{
 		d.BinDir(),
 		d.ManDir(),
 		d.ZshCompletionDir(),
 		d.BashCompletionDir(),
-		d.ToolsDir(),
-		d.State,
-		d.Cache,
+		d.FishCompletionDir(),
+		d.PwshCompletionDir(),
 	}
+}
+
+// EnsureDirs creates all required directories if they don't exist.
+func (d Dirs) EnsureDirs() error {
+	dirs := append([]string{d.Config, d.ToolsDir(), d.State, d.Cache}, d.SymlinkDirs()...)
 	for _, dir := range dirs {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
-			return err
+			return fmt.Errorf("creating %s: %w", dir, err)
 		}
 	}
 	return nil
@@ -114,30 +118,7 @@ func homeDir() string {
 	return h
 }
 
-func defaultConfigHome() string {
-	if runtime.GOOS == "darwin" {
-		return filepath.Join(homeDir(), ".config")
-	}
-	return filepath.Join(homeDir(), ".config")
-}
-
-func defaultDataHome() string {
-	if runtime.GOOS == "darwin" {
-		return filepath.Join(homeDir(), ".local", "share")
-	}
-	return filepath.Join(homeDir(), ".local", "share")
-}
-
-func defaultStateHome() string {
-	if runtime.GOOS == "darwin" {
-		return filepath.Join(homeDir(), ".local", "state")
-	}
-	return filepath.Join(homeDir(), ".local", "state")
-}
-
-func defaultCacheHome() string {
-	if runtime.GOOS == "darwin" {
-		return filepath.Join(homeDir(), ".cache")
-	}
-	return filepath.Join(homeDir(), ".cache")
-}
+func defaultConfigHome() string { return filepath.Join(homeDir(), ".config") }
+func defaultDataHome() string   { return filepath.Join(homeDir(), ".local", "share") }
+func defaultStateHome() string  { return filepath.Join(homeDir(), ".local", "state") }
+func defaultCacheHome() string  { return filepath.Join(homeDir(), ".cache") }

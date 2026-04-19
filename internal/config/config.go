@@ -63,13 +63,13 @@ func (t Tool) ResolvePattern(goos, goarch string) string {
 
 // Name returns the tool name derived from the repo (the part after /).
 func (t Tool) Name() string {
-	_, name := splitRepo(t.Repo)
+	_, name := SplitRepo(t.Repo)
 	return name
 }
 
 // Owner returns the repository owner (the part before /).
 func (t Tool) Owner() string {
-	owner, _ := splitRepo(t.Repo)
+	owner, _ := SplitRepo(t.Repo)
 	return owner
 }
 
@@ -131,7 +131,9 @@ func (c *Config) RemoveTool(repo string) bool {
 	return false
 }
 
-func splitRepo(repo string) (owner, name string) {
+// SplitRepo splits an "owner/name" string into its parts. If repo has no
+// slash, owner is empty and name is the whole input.
+func SplitRepo(repo string) (owner, name string) {
 	for i := range repo {
 		if repo[i] == '/' {
 			return repo[:i], repo[i+1:]

@@ -468,3 +468,76 @@ func TestParseBinSpec(t *testing.T) {
 		}
 	}
 }
+
+func TestFindFileInDir(t *testing.T) {
+root := t.TempDir()
+// Layout:
+//   root/bin/foo
+//   root/share/man/man1/foo.1
+must := func(p string) {
+if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+t.Fatal(err)
+}
+if err := os.WriteFile(p, []byte("x"), 0o644); err != nil {
+t.Fatal(err)
+}
+}
+binPath := filepath.Join(root, "bin", "foo")
+manPath := filepath.Join(root, "share", "man", "man1", "foo.1")
+must(binPath)
+must(manPath)
+
+// Exact relative path.
+if got := findFileInDir(root, "bin/foo"); got != binPath {
+t.Errorf("exact: got %q want %q", got, binPath)
+}
+// Basename walk.
+if got := findFileInDir(root, "foo.1"); got != manPath {
+t.Errorf("basename: got %q want %q", got, manPath)
+}
+// Missing.
+if got := findFileInDir(root, "does-not-exist"); got != "" {
+t.Errorf("missing: got %q want empty", got)
+}
+}
+
+func TestFindDownloadedAsset(t *testing.T) {
+root := t.TempDir()
+// Mix of skippable and a real asset.
+files := map[string]bool{
+"tool-checksums.txt": true, // skippable
+"tool.sha256":        true,
+"tool.tar.gz.sig":    true,
+"tool.tar.gz.asc":    true,
+"tool.tar.gz":        false, // real
+}
+for name := range files {
+if err := os.WriteFile(filepath.Join(root, name), []byte("x"), 0o644); err != nil {
+t.Fatal(err)
+}
+}
+got, err := findDownloadedAsset(root)
+if err != nil {
+t.Fatalf("err=%v", err)
+}
+if filepath.Base(got) != "tool.tar.gz" {
+t.Errorf("got %q, want tool.tar.gz", got)
+}
+
+// Empty directory -> error.
+empty := t.TempDir()
+if _, err := findDownloadedAsset(empty); err == nil {
+t.Errorf("expected error on empty dir")
+}
+
+// Only skippable files -> error.
+skipOnly := t.TempDir()
+for _, n := range []string{"foo.sha256", "bar.sig"} {
+if err := os.WriteFile(filepath.Join(skipOnly, n), []byte("x"), 0o644); err != nil {
+t.Fatal(err)
+}
+}
+if _, err := findDownloadedAsset(skipOnly); err == nil {
+t.Errorf("expected error when only skippable files present")
+}
+}

@@ -8,6 +8,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/ascarter/gh-tool/internal/config"
+	"github.com/ascarter/gh-tool/internal/paths"
 	"github.com/ascarter/gh-tool/internal/tool"
 )
 
@@ -50,9 +51,7 @@ func init() {
 
 // manifestPath returns the manifest path honoring --file, falling back to the
 // XDG default.
-func manifestPath(dirs interface {
-	ConfigFile() string
-}) string {
+func manifestPath(dirs paths.Dirs) string {
 	if flagFile != "" {
 		return flagFile
 	}

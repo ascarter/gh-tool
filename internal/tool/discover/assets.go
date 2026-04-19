@@ -187,11 +187,24 @@ func preferArchives(list []Asset) []Asset {
 	return out
 }
 
+// archiveExts is the list of recognized archive suffixes, longest-first so
+// compound forms like ".tar.gz" match before ".gz".
+var archiveExts = []string{".tar.gz", ".tar.xz", ".tar.bz2", ".tar.zst", ".tgz", ".txz", ".tbz2", ".zip"}
+
+// StripArchiveExt removes a recognized archive suffix from name (case-
+// insensitive). Returns name unchanged when no recognized suffix is present.
+func StripArchiveExt(name string) string {
+	if stem, ok := archiveStem(name); ok {
+		return stem
+	}
+	return name
+}
+
 // archiveStem returns the asset name with a recognized archive extension
 // removed and ok=true when the asset is an archive.
 func archiveStem(name string) (string, bool) {
 	low := strings.ToLower(name)
-	for _, ext := range []string{".tar.gz", ".tar.xz", ".tar.bz2", ".tar.zst", ".tgz", ".txz", ".tbz2", ".zip"} {
+	for _, ext := range archiveExts {
 		if strings.HasSuffix(low, ext) {
 			return name[:len(name)-len(ext)], true
 		}

@@ -391,7 +391,7 @@ func confirmAddPattern(fold *discover.FoldResult, tag string, chosen map[discove
 //   - rename: if the resulting bin name does not match the repo name, offer
 //     to rename it (writing "source:reponame" in the manifest).
 func chooseAddBins(layout *discover.Layout, repo, inspectAssetName, foldedPattern string) ([]string, error) {
-	_, name := splitRepoForAdd(repo)
+	_, name := config.SplitRepo(repo)
 	if len(layout.Executables) == 0 {
 		warnf("no executables detected in archive; you may need to set bin manually later.")
 		return nil, nil
@@ -424,7 +424,7 @@ func chooseAddBins(layout *discover.Layout, repo, inspectAssetName, foldedPatter
 		// binaries resolve correctly. Skip when the fold produced a
 		// per-platform map — there is no single template to embed.
 		if bareBinary && foldedPattern != "" {
-			source = stripArchiveExt(foldedPattern)
+			source = stripBinaryExt(foldedPattern)
 		}
 
 		// Offer to rename only when there's a single binary, the basename
@@ -455,13 +455,16 @@ func chooseAddBins(layout *discover.Layout, repo, inspectAssetName, foldedPatter
 	return out, nil
 }
 
-// stripArchiveExt removes a single trailing archive extension from s. Used to
-// derive a bare-binary name from a folded archive pattern.
-func stripArchiveExt(s string) string {
-	for _, ext := range []string{".tar.gz", ".tar.xz", ".tar.bz2", ".tgz", ".txz", ".zip", ".gz", ".xz", ".exe"} {
-		if strings.HasSuffix(strings.ToLower(s), ext) {
-			return s[:len(s)-len(ext)]
-		}
+// stripBinaryExt removes a single trailing extension that may appear on a
+// bare-binary asset (archive extension or .exe). Used to derive a bare-
+// binary symlink source from a folded archive pattern.
+func stripBinaryExt(s string) string {
+	stripped := discover.StripArchiveExt(s)
+	if stripped != s {
+		return stripped
+	}
+	if strings.HasSuffix(strings.ToLower(s), ".exe") {
+		return s[:len(s)-len(".exe")]
 	}
 	return s
 }
@@ -487,13 +490,4 @@ func previewAddEntry(t config.Tool) {
 		Tool []config.Tool `toml:"tool"`
 	}{Tool: []config.Tool{t}})
 	fmt.Println("─────────────────────────────────────────")
-}
-
-func splitRepoForAdd(repo string) (owner, name string) {
-	for i := range repo {
-		if repo[i] == '/' {
-			return repo[:i], repo[i+1:]
-		}
-	}
-	return "", repo
 }

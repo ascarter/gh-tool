@@ -4,6 +4,8 @@ import (
 	"fmt"
 
 	"github.com/spf13/cobra"
+
+	"github.com/ascarter/gh-tool/internal/paths"
 )
 
 var shellCmd = &cobra.Command{
@@ -24,9 +26,10 @@ func init() {
 }
 
 func runShell(cmd *cobra.Command, args []string) error {
-	dirs := resolveDirs()
-	shell := args[0]
+	return emitShell(resolveDirs(), args[0])
+}
 
+func emitShell(dirs paths.Dirs, shell string) error {
 	switch shell {
 	case "bash":
 		fmt.Printf(`# gh-tool shell integration (bash)
@@ -69,3 +72,4 @@ end
 
 	return nil
 }
+
