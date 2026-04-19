@@ -92,11 +92,6 @@ or edit your manifest directly.`, args[0])
 		return err
 	}
 
-	fold := discover.Fold(rel.Tag, chosen)
-	if err := confirmAddPattern(&fold, rel.Tag, chosen); err != nil {
-		return err
-	}
-
 	hostKey := discover.PlatformKey(runtime.GOOS + "_" + runtime.GOARCH)
 	hostAssetName, hostSupported := chosen[hostKey]
 	var inspectAssetName string
@@ -128,6 +123,19 @@ or edit your manifest directly.`, args[0])
 	}
 	layout, err := discover.Inspect(assetPath)
 	if err != nil {
+		return err
+	}
+
+	// If the inspected asset is darwin and was tentatively expanded to
+	// both archs (same asset name), use the Mach-O scan to drop the
+	// arches the binary doesn't actually support. Skip when no Mach-O
+	// was detected — the asset may be a script/JAR that runs everywhere.
+	if inspectKey.GOOS() == "darwin" && len(layout.MachOArchs) > 0 {
+		refineDarwinArchs(chosen, inspectAssetName, layout.MachOArchs)
+	}
+
+	fold := discover.Fold(rel.Tag, chosen)
+	if err := confirmAddPattern(&fold, rel.Tag, chosen); err != nil {
 		return err
 	}
 
@@ -199,6 +207,29 @@ or edit your manifest directly.`, args[0])
 	mgr := tool.NewManager(dirs)
 	mgr.CleanupInstall(t.Name())
 	return mgr.Install(t, true)
+}
+
+// refineDarwinArchs uses a Mach-O architecture scan from the inspected
+// asset to drop tentative darwin arches that the asset does not actually
+// support. The classify step optimistically expands a darwin OS-only
+// asset (e.g. fnm-macos.zip) into both darwin_amd64 and darwin_arm64;
+// here we trim that down once we've actually seen the binary.
+//
+// Only entries in chosen that point at the same inspected asset name are
+// affected — a manifest that selected a different asset for a sibling
+// arch (e.g. an explicit darwin-arm64 binary alongside a universal one)
+// is left untouched.
+func refineDarwinArchs(chosen map[discover.PlatformKey]string, inspectAssetName string, machoArchs map[string]bool) {
+	for _, arch := range []string{"amd64", "arm64"} {
+		key := discover.PlatformKey("darwin_" + arch)
+		if chosen[key] != inspectAssetName {
+			continue
+		}
+		if !machoArchs[arch] {
+			delete(chosen, key)
+			warnf("dropping %s: inspected Mach-O does not contain %s slice", key, arch)
+		}
+	}
 }
 
 func chooseAddPlatforms(platforms []discover.PlatformKey) ([]discover.PlatformKey, error) {

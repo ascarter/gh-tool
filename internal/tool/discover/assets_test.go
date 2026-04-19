@@ -135,6 +135,69 @@ t.Errorf("preferArchives dropped lone bare binary: %+v", out)
 }
 
 func TestClassifyAssetsTwoPass(t *testing.T) {
+t.Run("fnm: darwin OS-only asset expands to both archs", func(t *testing.T) {
+in := []Asset{
+{Name: "fnm-linux.zip"},
+{Name: "fnm-macos.zip"},
+{Name: "fnm-windows.zip"},
+{Name: "fnm-arm64.zip"},
+{Name: "fnm-arm32.zip"},
+}
+got, _ := classifyAssets(in)
+// fnm-macos.zip is tentatively expanded to both darwin archs;
+// cmd/add refines this against the actual Mach-O.
+type kv struct{ name, plat string }
+want := []kv{
+{"fnm-linux.zip", "linux_amd64"},
+{"fnm-macos.zip", "darwin_amd64"},
+{"fnm-macos.zip", "darwin_arm64"},
+{"fnm-windows.zip", "windows_amd64"},
+{"fnm-arm64.zip", "linux_arm64"},
+{"fnm-arm32.zip", "linux_arm"},
+}
+if len(got) != len(want) {
+t.Fatalf("classified %d, want %d: %+v", len(got), len(want), got)
+}
+seen := map[kv]bool{}
+for _, a := range got {
+seen[kv{a.Name, string(a.Platform)}] = true
+}
+for _, w := range want {
+if !seen[w] {
+t.Errorf("missing classification %s -> %s", w.name, w.plat)
+}
+}
+})
+
+t.Run("darwin tentative expansion suppressed by explicit darwin-arm64 sibling", func(t *testing.T) {
+// When a release ships an explicit darwin-arm64 asset alongside
+// an OS-only macos asset, the OS-only asset is partial-skipped
+// (osesWithExplicitArch guard) — no tentative expansion occurs.
+in := []Asset{
+{Name: "tool-macos.zip"},
+{Name: "tool-darwin-arm64.zip"},
+}
+got, skipped := classifyAssets(in)
+var sawMacosClassified bool
+for _, a := range got {
+if a.Name == "tool-macos.zip" {
+sawMacosClassified = true
+}
+}
+if sawMacosClassified {
+t.Errorf("tool-macos.zip should be skipped when an explicit darwin sibling exists; got=%+v", got)
+}
+var sawSkipped bool
+for _, a := range skipped {
+if a.Name == "tool-macos.zip" {
+sawSkipped = true
+}
+}
+if !sawSkipped {
+t.Errorf("expected tool-macos.zip in skipped, got %+v", skipped)
+}
+})
+
 t.Run("fnm: defaults applied because no sibling has explicit arch", func(t *testing.T) {
 in := []Asset{
 {Name: "fnm-linux.zip"},
@@ -144,20 +207,22 @@ in := []Asset{
 {Name: "fnm-arm32.zip"},
 }
 got, _ := classifyAssets(in)
-want := map[string]PlatformKey{
-"fnm-linux.zip":   "linux_amd64",
-"fnm-macos.zip":   "darwin_amd64",
-"fnm-windows.zip": "windows_amd64",
-"fnm-arm64.zip":   "linux_arm64",
-"fnm-arm32.zip":   "linux_arm",
-}
-if len(got) != len(want) {
-t.Fatalf("classified %d, want %d: %+v", len(got), len(want), got)
-}
+// Linux/Windows OS-only assets keep the historical amd64 default.
+linuxFound := false
+windowsFound := false
 for _, a := range got {
-if a.Platform != want[a.Name] {
-t.Errorf("%s -> %q, want %q", a.Name, a.Platform, want[a.Name])
+if a.Name == "fnm-linux.zip" && a.Platform == "linux_amd64" {
+linuxFound = true
 }
+if a.Name == "fnm-windows.zip" && a.Platform == "windows_amd64" {
+windowsFound = true
+}
+}
+if !linuxFound {
+t.Errorf("fnm-linux.zip should default to linux_amd64; got=%+v", got)
+}
+if !windowsFound {
+t.Errorf("fnm-windows.zip should default to windows_amd64; got=%+v", got)
 }
 })
 

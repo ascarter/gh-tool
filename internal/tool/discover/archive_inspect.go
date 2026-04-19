@@ -25,6 +25,12 @@ type Layout struct {
 	// Completions are relative paths to *.bash/*.zsh/*.fish files or files
 	// under completions/{bash,zsh,fish}/.
 	Completions []string
+
+	// MachOArchs is the union of architectures found in any Mach-O file
+	// extracted from the asset, with keys "amd64" and/or "arm64". Empty
+	// when the asset contains no recognizable Mach-O binaries (e.g. ELF,
+	// PE, JAR, scripts).
+	MachOArchs map[string]bool
 }
 
 // DownloadAsset fetches a single named asset from a release into destDir
@@ -67,7 +73,7 @@ var manPageRE = regexp.MustCompile(`\.[1-9]([a-z]?)$`)
 // scanLayout walks root and classifies files into executables, man pages,
 // and completions.
 func scanLayout(root string) (*Layout, error) {
-	layout := &Layout{}
+	layout := &Layout{MachOArchs: map[string]bool{}}
 	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
@@ -82,6 +88,17 @@ func scanLayout(root string) (*Layout, error) {
 		// Executables: top-level (or single nested dir) with exec bit, or *.exe.
 		if isExecutable(path, info, base) && isTopOrSingleNested(rel) {
 			layout.Executables = append(layout.Executables, rel)
+		}
+
+		// Mach-O arch scan: look at every regular file (some assets ship
+		// binaries without the exec bit set after extraction). Cheap:
+		// reads only the Mach-O header.
+		if info.Mode().IsRegular() {
+			if archs, _ := MachOArchs(path); len(archs) > 0 {
+				for k := range archs {
+					layout.MachOArchs[k] = true
+				}
+			}
 		}
 
 		// Man pages: under man/manN/ or with .N suffix, in a man-ish dir.

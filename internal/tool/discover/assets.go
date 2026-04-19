@@ -148,6 +148,22 @@ func classifyAssets(in []Asset) (classified, skipped []Asset) {
 				skipped = append(skipped, p.asset)
 				continue
 			}
+			// macOS releases that ship one OS-only asset are nearly
+			// always universal (lipo'd) binaries — emit entries for
+			// both arches tentatively. cmd/add refines this against
+			// the actual Mach-O after inspection. Linux/Windows
+			// OS-only assets keep the historical amd64 default
+			// (their releases don't share that universal-binary
+			// convention).
+			if goos == "darwin" {
+				for _, arch := range []string{"amd64", "arm64"} {
+					a := p.asset
+					a.Platform = PlatformKey("darwin_" + arch)
+					a.Variant = p.variant
+					classified = append(classified, a)
+				}
+				continue
+			}
 			goarch = "amd64"
 		}
 		p.asset.Platform = PlatformKey(goos + "_" + goarch)
