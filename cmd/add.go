@@ -13,6 +13,7 @@ import (
 	"golang.org/x/term"
 
 	"github.com/ascarter/gh-tool/internal/config"
+	"github.com/ascarter/gh-tool/internal/tool"
 	"github.com/ascarter/gh-tool/internal/tool/discover"
 )
 
@@ -23,8 +24,8 @@ var addCmd = &cobra.Command{
 interactively, then write the resulting [[tool]] block into the manifest.
 
 Use this when you want to add a new tool without hand-editing the manifest.
-The entry is not installed automatically — run "gh tool install <repo>"
-afterwards.
+By default the tool is only added to the manifest; pass --install to also
+download and install it in the same step.
 
 For non-interactive use, run "gh tool install <repo> --pattern ..." with
 the values you want.`,
@@ -36,12 +37,14 @@ var (
 	flagAddFile    string
 	flagAddTag     string
 	flagAddNoWrite bool
+	flagAddInstall bool
 )
 
 func init() {
 	addCmd.Flags().StringVarP(&flagAddFile, "file", "f", "", "path to manifest file (default: $XDG_CONFIG_HOME/gh-tool/config.toml)")
 	addCmd.Flags().StringVarP(&flagAddTag, "tag", "t", "", "release tag to inspect (default: latest)")
 	addCmd.Flags().BoolVar(&flagAddNoWrite, "no-write", false, "print the generated [[tool]] block without writing the manifest")
+	addCmd.Flags().BoolVar(&flagAddInstall, "install", false, "install the tool after writing the manifest entry")
 	rootCmd.AddCommand(addCmd)
 }
 
@@ -181,8 +184,21 @@ or edit your manifest directly.`, args[0])
 	} else {
 		fmt.Printf("✓ Saved %s to %s\n", repo, mfPath)
 	}
-	fmt.Printf("Run: gh tool install %s\n", repo)
-	return nil
+
+	if !flagAddInstall {
+		return nil
+	}
+
+	var doInstall bool
+	if err := promptConfirm(fmt.Sprintf("Install %s now?", repo), true, &doInstall); err != nil {
+		return err
+	}
+	if !doInstall {
+		return nil
+	}
+	mgr := tool.NewManager(dirs)
+	mgr.CleanupInstall(t.Name())
+	return mgr.Install(t, true)
 }
 
 func chooseAddPlatforms(platforms []discover.PlatformKey) ([]discover.PlatformKey, error) {
