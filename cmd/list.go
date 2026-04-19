@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"runtime"
 	"sort"
+	"sync"
 
 	"github.com/cli/go-gh/v2/pkg/tableprinter"
 	"github.com/cli/go-gh/v2/pkg/term"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/ascarter/gh-tool/internal/config"
 	"github.com/ascarter/gh-tool/internal/tool"
+	"github.com/ascarter/gh-tool/internal/ui"
 )
 
 var listCmd = &cobra.Command{
@@ -89,6 +91,11 @@ func runList(cmd *cobra.Command, args []string) error {
 	tp.AddField("STATUS")
 	tp.EndRow()
 
+	// Fan out LatestTag for installed tools in parallel — this is the
+	// only network call in `list` and dominates wall time for large
+	// manifests.
+	latestByRepo := fetchLatestTags(repos, stateByRepo)
+
 	for _, repo := range repos {
 		state, installed := stateByRepo[repo]
 		manifest, inManifest := manifestByRepo[repo]
@@ -103,8 +110,8 @@ func runList(cmd *cobra.Command, args []string) error {
 			continue
 		}
 
-		latest, err := tool.LatestTag(state.Repo)
-		if err != nil {
+		latest := latestByRepo[repo]
+		if latest == "" {
 			latest = "?"
 		}
 
@@ -113,6 +120,41 @@ func runList(cmd *cobra.Command, args []string) error {
 	}
 
 	return tp.Render()
+}
+
+// fetchLatestTags resolves LatestTag for every repo that is locally
+// installed, in parallel. Repos without an installed state are not queried
+// (they appear as "pending" and don't need the LATEST column).
+func fetchLatestTags(repos []string, stateByRepo map[string]tool.InstalledState) map[string]string {
+	out := map[string]string{}
+	var mu sync.Mutex
+
+	jobs := make([]ui.Job, 0, len(repos))
+	for _, repo := range repos {
+		if _, ok := stateByRepo[repo]; !ok {
+			continue
+		}
+		repo := repo
+		jobs = append(jobs, ui.Job{
+			Name: repo,
+			Run: func() error {
+				latest, err := tool.LatestTag(repo)
+				mu.Lock()
+				if err != nil {
+					out[repo] = "?"
+				} else {
+					out[repo] = latest
+				}
+				mu.Unlock()
+				return nil
+			},
+		})
+	}
+	if len(jobs) == 0 {
+		return out
+	}
+	_, _ = ui.Run(jobs, ui.DefaultJobs())
+	return out
 }
 
 func row(tp tableprinter.TablePrinter, repo, installed, latest, status string) {

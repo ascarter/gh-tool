@@ -15,6 +15,7 @@ import (
 	"github.com/ascarter/gh-tool/internal/config"
 	"github.com/ascarter/gh-tool/internal/tool"
 	"github.com/ascarter/gh-tool/internal/tool/discover"
+	"github.com/ascarter/gh-tool/internal/ui"
 )
 
 var addCmd = &cobra.Command{
@@ -204,7 +205,7 @@ or edit your manifest directly.`, args[0])
 	if !doInstall {
 		return nil
 	}
-	mgr := tool.NewManager(dirs)
+	mgr := tool.NewManager(dirs).WithReporter(ui.NewLineReporter(false, true))
 	mgr.CleanupInstall(t.Name())
 	return mgr.Install(t, true)
 }

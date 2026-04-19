@@ -46,12 +46,30 @@ func (s InstalledState) AsTool() config.Tool {
 
 // Manager handles tool installation, removal, and state management.
 type Manager struct {
-	Dirs paths.Dirs
+	Dirs     paths.Dirs
+	reporter Reporter
 }
 
-// NewManager creates a Manager with resolved XDG paths.
+// NewManager creates a Manager with resolved XDG paths and a no-op reporter.
+// Use SetReporter (or WithReporter) to attach a real reporter.
 func NewManager(dirs paths.Dirs) *Manager {
-	return &Manager{Dirs: dirs}
+	return &Manager{Dirs: dirs, reporter: nopReporter{}}
+}
+
+// SetReporter attaches a Reporter to receive progress events. Passing nil
+// resets the manager to the no-op reporter.
+func (m *Manager) SetReporter(r Reporter) {
+	if r == nil {
+		m.reporter = nopReporter{}
+		return
+	}
+	m.reporter = r
+}
+
+// WithReporter is a chainable helper equivalent to SetReporter.
+func (m *Manager) WithReporter(r Reporter) *Manager {
+	m.SetReporter(r)
+	return m
 }
 
 // Install downloads, extracts, and symlinks a tool. The given config.Tool
@@ -60,11 +78,19 @@ func NewManager(dirs paths.Dirs) *Manager {
 // variables (including {{tag}} once the latest tag is known), and installs.
 // If verify is true, attempts attestation verification on the downloaded asset.
 func (m *Manager) Install(t config.Tool, verify bool) error {
+	name := t.Name()
+	m.reporter.Start(name)
 	assetPath, tag, resolvedPattern, err := m.DownloadAsset(t)
 	if err != nil {
+		m.reporter.Fail(name, err)
 		return err
 	}
-	return m.installFromAsset(t, assetPath, tag, resolvedPattern, verify)
+	if err := m.installFromAsset(t, assetPath, tag, resolvedPattern, verify); err != nil {
+		m.reporter.Fail(name, err)
+		return err
+	}
+	m.reporter.Done(name, tag)
+	return nil
 }
 
 // DownloadAsset resolves the platform-specific pattern, resolves the latest
@@ -106,7 +132,7 @@ func (m *Manager) DownloadAsset(t config.Tool) (assetPath, tag, resolvedPattern 
 
 	args := []string{"release", "download", tag, "-R", t.Repo, "-D", cacheDir, "-p", resolvedPattern, "--clobber"}
 
-	fmt.Printf("Downloading %s %s...\n", t.Repo, tag)
+	m.reporter.Stage(name, fmt.Sprintf("Downloading %s %s", t.Repo, tag))
 	if _, _, err := gh.Exec(args...); err != nil {
 		return "", "", "", fmt.Errorf("downloading release: %w", err)
 	}
@@ -132,14 +158,14 @@ func (m *Manager) installFromAsset(t config.Tool, assetPath, tag, resolvedPatter
 	name := t.Name()
 
 	if verify {
-		verifyAttestation(t.Repo, assetPath)
+		m.verifyAttestation(name, t.Repo, assetPath)
 	}
 
 	// Clean previous install
 	toolDir := m.Dirs.ToolDir(name)
 	_ = os.RemoveAll(toolDir)
 
-	fmt.Printf("Extracting %s...\n", filepath.Base(assetPath))
+	m.reporter.Stage(name, fmt.Sprintf("Extracting %s", filepath.Base(assetPath)))
 	if err := archive.Extract(assetPath, toolDir); err != nil {
 		return fmt.Errorf("extracting: %w", err)
 	}
@@ -161,21 +187,15 @@ func (m *Manager) installFromAsset(t config.Tool, assetPath, tag, resolvedPatter
 		return fmt.Errorf("writing state: %w", err)
 	}
 
-	fmt.Printf("✓ Installed %s", name)
-	if tag != "" {
-		fmt.Printf(" (%s)", tag)
-	}
-	fmt.Println()
 	return nil
 }
 
 // Remove uninstalls a tool by removing symlinks, tool dir, cache, and state.
 func (m *Manager) Remove(t config.Tool) error {
 	name := t.Name()
-
+	m.reporter.Start(name)
 	m.cleanupInstall(name)
-
-	fmt.Printf("✓ Removed %s\n", name)
+	m.reporter.Done(name, "")
 	return nil
 }
 
@@ -289,12 +309,12 @@ func (m *Manager) createSymlinks(t config.Tool, tag, toolDir string) error {
 	for _, man := range t.Man {
 		src := findFileInDir(toolDir, man)
 		if src == "" {
-			fmt.Printf("  warning: man page %q not found\n", man)
+			m.reporter.Warn(name, fmt.Sprintf("man page %q not found", man))
 			continue
 		}
 		dst := filepath.Join(m.Dirs.ManDir(), filepath.Base(man))
 		if err := forceSymlink(src, dst); err != nil {
-			fmt.Printf("  warning: man page %q: %s\n", man, err)
+			m.reporter.Warn(name, fmt.Sprintf("man page %q: %s", man, err))
 		}
 	}
 
@@ -308,7 +328,7 @@ func (m *Manager) createSymlinks(t config.Tool, tag, toolDir string) error {
 	for _, comp := range t.Completions {
 		src := findFileInDir(toolDir, comp)
 		if src == "" {
-			fmt.Printf("  warning: completion %q not found\n", comp)
+			m.reporter.Warn(name, fmt.Sprintf("completion %q not found", comp))
 			continue
 		}
 		base := filepath.Base(comp)
@@ -330,7 +350,7 @@ func (m *Manager) createSymlinks(t config.Tool, tag, toolDir string) error {
 			dst = filepath.Join(m.Dirs.BashCompletionDir(), base)
 		}
 		if err := forceSymlink(src, dst); err != nil {
-			fmt.Printf("  warning: completion %q: %s\n", comp, err)
+			m.reporter.Warn(name, fmt.Sprintf("completion %q: %s", comp, err))
 		}
 	}
 
@@ -456,14 +476,13 @@ func forceSymlink(src, dst string) error {
 }
 
 // verifyAttestation attempts to verify a downloaded asset using gh attestation verify.
-// This is best-effort: it prints a warning if verification fails but does not return an error.
-func verifyAttestation(repo, assetPath string) {
-	fmt.Printf("Verifying attestation for %s...\n", filepath.Base(assetPath))
-	_, _, err := gh.Exec("attestation", "verify", assetPath, "-R", repo)
-	if err != nil {
-		fmt.Printf("  ⚠ Attestation not verified (this is expected for most repos)\n")
-	} else {
-		fmt.Printf("  ✓ Attestation verified\n")
+// This is best-effort: it surfaces a warning via the reporter if verification
+// fails but does not return an error. On success the next stage (Extracting)
+// is the user's signal that verification passed.
+func (m *Manager) verifyAttestation(name, repo, assetPath string) {
+	m.reporter.Stage(name, fmt.Sprintf("Verifying attestation for %s", filepath.Base(assetPath)))
+	if _, _, err := gh.Exec("attestation", "verify", assetPath, "-R", repo); err != nil {
+		m.reporter.Stage(name, "attestation not verified (this is expected for most repos)")
 	}
 }
 

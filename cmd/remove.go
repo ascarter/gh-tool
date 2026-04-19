@@ -7,6 +7,7 @@ import (
 
 	"github.com/ascarter/gh-tool/internal/config"
 	"github.com/ascarter/gh-tool/internal/tool"
+	"github.com/ascarter/gh-tool/internal/ui"
 )
 
 var removeCmd = &cobra.Command{
@@ -25,7 +26,7 @@ reinstall it.`,
 func runRemove(cmd *cobra.Command, args []string) error {
 	repo := args[0]
 	dirs := resolveDirs()
-	mgr := tool.NewManager(dirs)
+	mgr := tool.NewManager(dirs).WithReporter(removeReporter{})
 
 	// Resolve tool name. Prefer state (handles repos installed via flags
 	// without a manifest entry); fall back to the repo arg shape.
@@ -54,4 +55,16 @@ func runRemove(cmd *cobra.Command, args []string) error {
 	}
 
 	return nil
+}
+
+// removeReporter prints just the success line for `remove`. The line
+// reporter is overkill — there are no stages, no warnings to surface.
+type removeReporter struct{}
+
+func (removeReporter) Start(string)         {}
+func (removeReporter) Stage(string, string) {}
+func (removeReporter) Warn(string, string)  {}
+func (removeReporter) Done(name, _ string)  { fmt.Printf("%s Removed %s\n", ui.Success(ui.IconSuccess), name) }
+func (removeReporter) Fail(name string, err error) {
+	fmt.Printf("%s %s: %s\n", ui.Error(ui.IconFailure), name, err)
 }
