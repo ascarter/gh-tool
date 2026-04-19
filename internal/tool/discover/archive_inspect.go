@@ -80,7 +80,7 @@ func scanLayout(root string) (*Layout, error) {
 		base := strings.ToLower(filepath.Base(rel))
 
 		// Executables: top-level (or single nested dir) with exec bit, or *.exe.
-		if isExecutable(info, base) && isTopOrSingleNested(rel) {
+		if isExecutable(path, info, base) && isTopOrSingleNested(rel) {
 			layout.Executables = append(layout.Executables, rel)
 		}
 
@@ -101,16 +101,52 @@ func scanLayout(root string) (*Layout, error) {
 	return layout, nil
 }
 
-func isExecutable(info os.FileInfo, lowerBase string) bool {
+func isExecutable(path string, info os.FileInfo, lowerBase string) bool {
 	if strings.HasSuffix(lowerBase, ".exe") {
 		return true
 	}
-	// Any user-execute bit and a regular file qualifies.
 	mode := info.Mode()
 	if !mode.IsRegular() {
 		return false
 	}
-	return mode&0o111 != 0
+	if mode&0o111 != 0 {
+		return true
+	}
+	// Some upstreams (notably tree-sitter/tree-sitter) ship binaries inside
+	// .zip archives where the stored Unix mode lacks the execute bit. Fall
+	// back to magic-byte sniffing so we still detect Mach-O / ELF / PE.
+	return hasExecutableMagic(path)
+}
+
+// hasExecutableMagic reports whether the file at path begins with the
+// magic bytes of a recognized native executable format (ELF, Mach-O, Mach-O
+// fat / universal, Windows PE).
+func hasExecutableMagic(path string) bool {
+	f, err := os.Open(path)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+	var buf [4]byte
+	n, _ := f.Read(buf[:])
+	if n < 4 {
+		return false
+	}
+	switch {
+	case buf[0] == 0x7f && buf[1] == 'E' && buf[2] == 'L' && buf[3] == 'F':
+		return true
+	case buf[0] == 0xCF && buf[1] == 0xFA && buf[2] == 0xED && buf[3] == 0xFE,
+		buf[0] == 0xCE && buf[1] == 0xFA && buf[2] == 0xED && buf[3] == 0xFE,
+		buf[0] == 0xFE && buf[1] == 0xED && buf[2] == 0xFA && buf[3] == 0xCF,
+		buf[0] == 0xFE && buf[1] == 0xED && buf[2] == 0xFA && buf[3] == 0xCE:
+		return true
+	case buf[0] == 0xCA && buf[1] == 0xFE && buf[2] == 0xBA && buf[3] == 0xBE,
+		buf[0] == 0xBE && buf[1] == 0xBA && buf[2] == 0xFE && buf[3] == 0xCA:
+		return true
+	case buf[0] == 'M' && buf[1] == 'Z':
+		return true
+	}
+	return false
 }
 
 // isTopOrSingleNested reports whether rel is a single path segment, or sits

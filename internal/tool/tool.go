@@ -266,6 +266,12 @@ func (m *Manager) createSymlinks(t config.Tool, tag, toolDir string) error {
 		if src == "" {
 			return fmt.Errorf("binary %q not found in extracted files", srcName)
 		}
+		// Some upstream archives (e.g. tree-sitter/tree-sitter zips) ship
+		// binaries without the execute bit set. Repair before symlinking
+		// so the user can actually run the resulting bin.
+		if info, err := os.Stat(src); err == nil && info.Mode().IsRegular() && info.Mode()&0o111 == 0 {
+			_ = os.Chmod(src, info.Mode()|0o111)
+		}
 		dst := filepath.Join(m.Dirs.BinDir(), linkName)
 		if err := forceSymlink(src, dst); err != nil {
 			return fmt.Errorf("symlink %s: %w", linkName, err)
