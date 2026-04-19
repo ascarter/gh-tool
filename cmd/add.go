@@ -171,7 +171,7 @@ or edit your manifest directly.`, args[0])
 		return err
 	}
 	if !ok {
-		fmt.Println("Aborted.")
+		warnf("aborted; %s not saved to %s.", repo, mfPath)
 		return nil
 	}
 
