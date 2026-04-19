@@ -368,7 +368,7 @@ func confirmAddPattern(fold *discover.FoldResult, tag string, chosen map[discove
 		}
 		return nil
 	}
-	fmt.Println("Cannot fold into a single pattern; using per-platform patterns:")
+	warnf("Cannot fold into a single pattern; using per-platform patterns:")
 	keys := make([]string, 0, len(fold.Patterns))
 	for k := range fold.Patterns {
 		keys = append(keys, k)
