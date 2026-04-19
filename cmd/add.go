@@ -113,7 +113,7 @@ or edit your manifest directly.`, args[0])
 		sort.Slice(keys, func(i, j int) bool { return keys[i] < keys[j] })
 		inspectKey = keys[0]
 		inspectAssetName = chosen[inspectKey]
-		fmt.Printf("Host (%s/%s) has no asset for this tool; inspecting %s for layout.\n", runtime.GOOS, runtime.GOARCH, inspectKey)
+		warnf("host (%s/%s) has no asset for this tool; inspecting %s for layout.", runtime.GOOS, runtime.GOARCH, inspectKey)
 	}
 
 	fmt.Printf("Downloading %s for inspection...\n", inspectAssetName)
@@ -393,7 +393,7 @@ func confirmAddPattern(fold *discover.FoldResult, tag string, chosen map[discove
 func chooseAddBins(layout *discover.Layout, repo, inspectAssetName, foldedPattern string) ([]string, error) {
 	_, name := splitRepoForAdd(repo)
 	if len(layout.Executables) == 0 {
-		fmt.Println("· No executables detected in archive; you may need to set --bin manually later.")
+		warnf("no executables detected in archive; you may need to set bin manually later.")
 		return nil, nil
 	}
 
