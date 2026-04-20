@@ -46,6 +46,29 @@ func TestPathSafe(t *testing.T) {
 	}
 }
 
+func TestPathSafe_GhtoolHome(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("GHTOOL_HOME", home)
+
+	// Strict descendant of GHTOOL_HOME: accepted even without a "gh-tool" segment.
+	for _, sub := range []string{"data", "state", "cache", "data/bin"} {
+		p := filepath.Join(home, sub)
+		if err := pathSafe(p); err != nil {
+			t.Errorf("pathSafe(%q) under GHTOOL_HOME rejected: %v", p, err)
+		}
+	}
+
+	// GHTOOL_HOME itself (not a strict descendant) is still rejected.
+	if err := pathSafe(home); err == nil {
+		t.Errorf("pathSafe(%q) should reject GHTOOL_HOME itself", home)
+	}
+
+	// Unrelated path is rejected even with GHTOOL_HOME set.
+	if err := pathSafe("/etc"); err == nil {
+		t.Errorf("pathSafe(/etc) should be rejected even with GHTOOL_HOME set")
+	}
+}
+
 // TestRunReset_Cleanup exercises the cleanup path against a temp Dirs via
 // XDG_* env overrides. It verifies data/state/cache are wiped and the
 // config file under Config is preserved. No network.

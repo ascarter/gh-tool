@@ -8,17 +8,31 @@ import (
 
 const appName = "gh-tool"
 
-// Dirs holds resolved XDG-compliant directory paths for gh-tool.
+// Dirs holds resolved directory paths for gh-tool.
 type Dirs struct {
-	Config string // $XDG_CONFIG_HOME/gh-tool
-	Data   string // $XDG_DATA_HOME/gh-tool
-	State  string // $XDG_STATE_HOME/gh-tool
-	Cache  string // $XDG_CACHE_HOME/gh-tool
+	Config string
+	Data   string
+	State  string
+	Cache  string
 }
 
-// Resolve returns Dirs with XDG paths resolved from environment variables
-// with platform-appropriate defaults.
+// Resolve returns Dirs using the following precedence:
+//  1. $GHTOOL_HOME — single-root override (config/data/state/cache live as
+//     subdirectories of the prefix; the prefix itself names the app, so no
+//     extra "gh-tool" segment is appended).
+//  2. XDG Base Directory env vars ($XDG_CONFIG_HOME etc.), each with a
+//     "gh-tool" segment appended.
+//  3. Platform defaults (~/.config, ~/.local/share, ~/.local/state, ~/.cache),
+//     each with a "gh-tool" segment appended.
 func Resolve() Dirs {
+	if home := os.Getenv("GHTOOL_HOME"); home != "" {
+		return Dirs{
+			Config: filepath.Join(home, "config"),
+			Data:   filepath.Join(home, "data"),
+			State:  filepath.Join(home, "state"),
+			Cache:  filepath.Join(home, "cache"),
+		}
+	}
 	return Dirs{
 		Config: filepath.Join(xdgDir("XDG_CONFIG_HOME", defaultConfigHome()), appName),
 		Data:   filepath.Join(xdgDir("XDG_DATA_HOME", defaultDataHome()), appName),

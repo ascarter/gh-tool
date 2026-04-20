@@ -1,0 +1,17 @@
+# Sample manifest used by the example Dockerfiles.
+# A small, broadly useful set of GitHub-released CLI tools.
+
+[[tool]]
+repo = "junegunn/fzf"
+pattern = "fzf-*-{{os}}_{{arch}}.tar.gz"
+bin = ["fzf"]
+
+[[tool]]
+repo = "BurntSushi/ripgrep"
+pattern = "ripgrep-*-{{triple}}.tar.gz"
+bin = ["rg"]
+
+[[tool]]
+repo = "jqlang/jq"
+pattern = "jq-{{platform}}-{{arch}}"
+bin = ["jq-{{platform}}-{{arch}}:jq"]

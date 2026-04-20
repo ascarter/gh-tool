@@ -1,0 +1,20 @@
+# syntax=docker/dockerfile:1.7
+# Example: provision a set of CLI tools with gh-tool on Fedora.
+#
+# Build with:
+#   docker build -f Dockerfile.fedora --secret id=gh_token,env=GH_TOKEN -t gh-tool-fedora .
+FROM fedora:latest
+
+ENV GHTOOL_HOME=/opt/gh-tool \
+    PATH=/opt/gh-tool/data/bin:/usr/local/bin:/usr/bin:/bin
+
+RUN dnf install -y --setopt=install_weak_deps=False gh && \
+    dnf clean all
+
+COPY config.toml /etc/gh-tool/config.toml
+COPY install.sh  /usr/local/bin/gh-tool-bootstrap
+RUN chmod +x /usr/local/bin/gh-tool-bootstrap
+RUN --mount=type=secret,id=gh_token,env=GH_TOKEN \
+    gh-tool-bootstrap /etc/gh-tool/config.toml
+
+CMD ["bash"]

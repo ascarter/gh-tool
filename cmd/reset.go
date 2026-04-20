@@ -106,9 +106,11 @@ func runReset(cmd *cobra.Command, _ []string) error {
 	return nil
 }
 
-// pathSafe rejects a path that is empty, too short, or that doesn't contain
-// a "gh-tool" segment — a belt-and-braces guard against a misresolved Dirs
-// sending os.RemoveAll at something it shouldn't touch.
+// pathSafe rejects a path that is empty, too short, or that doesn't look
+// like ours — a belt-and-braces guard against a misresolved Dirs sending
+// os.RemoveAll at something it shouldn't touch. A path is considered ours
+// when it either contains a "gh-tool" segment OR is a strict descendant of
+// $GHTOOL_HOME.
 func pathSafe(p string) error {
 	if strings.TrimSpace(p) == "" {
 		return errors.New("empty path")
@@ -118,17 +120,18 @@ func pathSafe(p string) error {
 		return errors.New("refusing root-like path")
 	}
 	segments := strings.Split(clean, string(filepath.Separator))
-	found := false
 	for _, s := range segments {
 		if s == appSegment {
-			found = true
-			break
+			return nil
 		}
 	}
-	if !found {
-		return errors.New("path does not contain a gh-tool segment")
+	if home := strings.TrimSpace(os.Getenv("GHTOOL_HOME")); home != "" {
+		hclean := filepath.Clean(home)
+		if hclean != "/" && hclean != "." && strings.HasPrefix(clean, hclean+string(filepath.Separator)) {
+			return nil
+		}
 	}
-	return nil
+	return errors.New("path does not contain a gh-tool segment")
 }
 
 // confirm reads a single y/N line from r, prompting to out.
