@@ -10,37 +10,7 @@ Maintain a simple TOML manifest in your dotfiles that describes the tools you wa
 gh extension install ascarter/gh-tool
 ```
 
-## Quick Start
-
-```sh
-# Install a tool
-gh tool install junegunn/fzf --pattern 'fzf-*-darwin_arm64.tar.gz'
-
-# Install with version pinning
-gh tool install jqlang/jq --pattern 'jq-macos-arm64' --tag jq-1.7.1
-
-# Install with architecture template variables
-gh tool install junegunn/fzf --pattern 'fzf-*-{{os}}_{{arch}}.tar.gz'
-
-# Install a Rust tool using platform triples
-gh tool install BurntSushi/ripgrep --pattern 'ripgrep-*-{{triple}}.tar.gz'
-
-# Install a bare binary with rename (source:target)
-gh tool install jqlang/jq --pattern 'jq-macos-arm64' --bin 'jq-macos-arm64:jq'
-
-# List installed tools and check for updates
-gh tool list
-
-# Upgrade everything to latest
-gh tool upgrade
-
-# Remove a tool
-gh tool remove junegunn/fzf
-```
-
-## Shell Integration
-
-Add to your shell profile to put installed tools on your PATH:
+Add gh-tool's `bin/` to your PATH via your shell profile:
 
 ```sh
 # bash (~/.bashrc)
@@ -53,11 +23,78 @@ eval "$(gh tool shell zsh)"
 gh tool shell fish | source
 ```
 
-## Manifest
+Open a new shell (or `source` the file you edited) before continuing.
 
-Declare tools in `$XDG_CONFIG_HOME/gh-tool/config.toml` (typically `~/.config/gh-tool/config.toml`). This file is designed to be checked into a dotfiles repo.
+## Tutorial
 
-The manifest is a **read-only input** — like a Brewfile. `gh tool install` reads it; the manifest is only written by `gh tool add` (the interactive authoring command). The local install set is tracked separately in per-tool state files under `$XDG_STATE_HOME/gh-tool/`.
+Most people never need to hand-edit TOML. The flow is:
+
+1. **`gh tool add owner/repo`** — interactive picker. Walks you from a GitHub repo to a working manifest entry: fetches the latest release, lets you pick the asset variants you want, inspects the archive for the binary/man/completion paths, and writes the entry to your manifest.
+2. **`gh tool install`** — reconciles the manifest. Installs everything that's listed but not installed yet.
+
+For example, add `bat` and `ripgrep` to your toolbox:
+
+```sh
+gh tool add sharkdp/bat
+gh tool add BurntSushi/ripgrep
+gh tool install
+```
+
+Your manifest now lives at `~/.config/gh-tool/config.toml` and is ready to commit to your dotfiles repo. Running `gh tool install` on a new machine reproduces the same set.
+
+`add` only writes the manifest — installation is a separate step so you can review the entry (and commit it) before downloading anything.
+
+## Daily workflow
+
+```sh
+# See what's installed, what's on latest, and any drift.
+gh tool list
+
+# Pull latest releases for everything installed.
+gh tool upgrade
+
+# Upgrade a single tool.
+gh tool upgrade junegunn/fzf
+
+# Re-apply the manifest after you edited it by hand (renamed a bin, changed
+# a pattern, etc.). Clears stale symlinks and cached downloads before
+# reinstalling.
+gh tool install --force
+
+# Remove a single tool. The manifest is NOT modified — if the entry is
+# still there, `gh tool install` will put it back.
+gh tool remove junegunn/fzf
+```
+
+Install and upgrade run in parallel by default. Handy flags on both:
+
+| Flag               | Purpose                                                        |
+|--------------------|----------------------------------------------------------------|
+| `-j, --jobs N`     | Parallelism cap (default `min(8, NumCPU)`).                    |
+| `--no-progress`    | Disable the live progress UI; print one line per event.        |
+| `-v, --verbose`    | Log every step (download, verify, extract) per tool.           |
+| `--no-verify`      | Skip attestation verification (install only).                  |
+
+## Removing gh-tool entirely
+
+`gh tool reset` removes every installed tool and wipes gh-tool's data, state, and cache directories. Your manifest is preserved so you can restore everything with `gh tool install` later.
+
+```sh
+gh tool reset           # confirms interactively
+gh tool reset --yes     # skip the prompt
+```
+
+`reset` does not remove the gh-tool extension itself. If you also want the extension gone, follow up with:
+
+```sh
+gh extension remove ascarter/gh-tool
+```
+
+If you want a truly clean slate (including the manifest), delete `~/.config/gh-tool/config.toml` yourself after running `reset`.
+
+## Manifest reference
+
+`gh tool add` is the easiest way to author manifest entries, but you can also edit `~/.config/gh-tool/config.toml` directly. The manifest is a **read-only input** — like a Brewfile. `gh tool install` reads it; only `gh tool add` writes it. Your local install set is tracked separately in per-tool state files under `~/.local/state/gh-tool/`.
 
 ```toml
 [[tool]]
@@ -89,89 +126,41 @@ pattern = "yq_{{os}}_{{arch}}.tar.gz"
 bin = ["yq_darwin_arm64:yq"]
 ```
 
-Reconcile the local install set against the manifest at any time:
+### Tool attributes
 
-```sh
-gh tool install                  # install anything missing; leave up-to-date tools alone
-gh tool install --force          # rebuild every manifest tool from scratch
-gh tool install junegunn/fzf     # install (or reinstall) just one tool from the manifest
-```
-
-After editing the manifest, use `--force` to apply spec changes (renamed `bin`, swapped `pattern`, etc.) — it clears stale symlinks and the cached download before reinstalling. `gh tool list` will flag changed-but-not-reapplied entries as `drift`.
-
-### Using an alternate manifest
-
-`--file` / `-f` points `install` at a manifest other than the default:
-
-```sh
-gh tool install --file ./tools.toml
-gh tool install -f ./laptop.toml --force
-```
-
-State always lives under `$XDG_STATE_HOME/gh-tool/` regardless of which manifest you load.
-
-### Recording an ad-hoc install
-
-Without a manifest entry you can still install one-off:
-
-```sh
-gh tool install junegunn/fzf --pattern 'fzf-*-{{os}}_{{arch}}.tar.gz' --bin fzf
-```
-
-This does not modify the manifest — the install only shows up in `gh tool list` (as `orphan` until you add it). To author a manifest entry interactively, use `gh tool add` (see below).
-
-### Adding a tool interactively
-
-`gh tool add` walks you from `owner/repo` to a working manifest entry without hand-editing TOML. It fetches the latest release, lets you pick the platforms and asset variants you want, folds them into a templated `pattern`, inspects the archive for the binary/man/completion paths, then writes the entry to the manifest:
-
-```sh
-gh tool add sharkdp/bat
-gh tool install sharkdp/bat
-```
-
-`add` only writes the manifest — run `gh tool install <repo>` afterwards to actually install. This keeps authoring and installation as separate, composable steps.
-
-Steps with a single obvious answer are auto-skipped (e.g., one platform, one matching executable, no completions found).
-
-`--file/-f` writes the entry to an alternate manifest. `--tag/-t` pins inspection to a specific release.
-
-The command requires an interactive terminal. For non-interactive workflows, use `gh tool install` with explicit flags or edit the manifest directly. Note: the manifest is reformatted on write — TOML comments and key ordering are not preserved.
-
-### Tool Attributes
-
-| Attribute     | Description                                                   | Default        |
-|---------------|---------------------------------------------------------------|----------------|
-| `repo`        | GitHub `owner/repo`                                           | required       |
+| Attribute     | Description                                                     | Default        |
+|---------------|-----------------------------------------------------------------|----------------|
+| `repo`        | GitHub `owner/repo`                                             | required       |
 | `pattern`     | Glob for release asset (supports template variables; see below) | required*      |
-| `patterns`    | Platform-specific pattern overrides (keyed by `os_arch`)      | none           |
-| `tag`         | Release tag to pin                                            | latest         |
-| `bin`         | Binary name(s) to symlink; use `source:link` to rename        | `[<toolname>]` |
-| `man`         | Man page path(s) relative to extracted archive                | none           |
-| `completions` | Shell completion path(s) relative to extracted archive        | none           |
-| `os`          | OS filter; install only on listed OSes (e.g., `["linux"]`)    | all            |
+| `patterns`    | Platform-specific pattern overrides (keyed by `os_arch`)        | none           |
+| `tag`         | Release tag to pin                                              | latest         |
+| `bin`         | Binary name(s) to symlink; use `source:link` to rename          | `[<toolname>]` |
+| `man`         | Man page path(s) relative to extracted archive                  | none           |
+| `completions` | Shell completion path(s) relative to extracted archive          | none           |
+| `os`          | OS filter; install only on listed OSes (e.g., `["linux"]`)      | all            |
 
 *Either `pattern` or `patterns` must be provided.
 
-### Pattern Variables
+### Pattern variables
 
 Patterns support template variables that expand to platform-specific values at runtime:
 
-| Variable         | Description                          | macOS ARM64              | Linux x86_64                     |
-|------------------|--------------------------------------|--------------------------|----------------------------------|
-| `{{os}}`         | Go-style OS name                     | `darwin`                 | `linux`                          |
-| `{{arch}}`       | Go-style architecture                | `arm64`                  | `amd64`                          |
-| `{{triple}}`     | Rust target triple (Linux=gnu)       | `aarch64-apple-darwin`   | `x86_64-unknown-linux-gnu`       |
-| `{{musltriple}}` | Rust target triple (Linux=musl)      | `aarch64-apple-darwin`   | `x86_64-unknown-linux-musl`      |
-| `{{platform}}`   | User-facing OS name                  | `macos`                  | `linux`                          |
-| `{{gnuarch}}`    | GNU/Rust-style architecture          | `aarch64`                | `x86_64`                         |
-| `{{tag}}`        | Resolved release tag                 | `v0.24.0`                | `v0.24.0`                        |
+| Variable         | Description                     | macOS ARM64            | Linux x86_64               |
+|------------------|---------------------------------|------------------------|----------------------------|
+| `{{os}}`         | Go-style OS name                | `darwin`               | `linux`                    |
+| `{{arch}}`       | Go-style architecture           | `arm64`                | `amd64`                    |
+| `{{triple}}`     | Rust target triple (Linux=gnu)  | `aarch64-apple-darwin` | `x86_64-unknown-linux-gnu` |
+| `{{musltriple}}` | Rust target triple (Linux=musl) | `aarch64-apple-darwin` | `x86_64-unknown-linux-musl`|
+| `{{platform}}`   | User-facing OS name             | `macos`                | `linux`                    |
+| `{{gnuarch}}`    | GNU/Rust-style architecture     | `aarch64`              | `x86_64`                   |
+| `{{tag}}`        | Resolved release tag            | `v0.24.0`              | `v0.24.0`                  |
 
-Use `{{os}}` / `{{arch}}` for Go-style release naming (e.g., `fzf-*-{{os}}_{{arch}}.tar.gz`).
-Use `{{triple}}` for Rust-style naming on glibc Linux (e.g., `ripgrep-*-{{triple}}.tar.gz`).
-Use `{{musltriple}}` for Rust tools that ship statically-linked musl Linux binaries (e.g., `uv-{{musltriple}}.tar.gz`).
-Use `{{platform}}` / `{{gnuarch}}` for projects that use `macos` or `aarch64` in asset names.
+- Use `{{os}}` / `{{arch}}` for Go-style release naming (e.g., `fzf-*-{{os}}_{{arch}}.tar.gz`).
+- Use `{{triple}}` for Rust-style naming on glibc Linux (e.g., `ripgrep-*-{{triple}}.tar.gz`).
+- Use `{{musltriple}}` for Rust tools that ship statically-linked musl Linux binaries (e.g., `uv-{{musltriple}}.tar.gz`).
+- Use `{{platform}}` / `{{gnuarch}}` for projects that use `macos` or `aarch64` in asset names.
 
-### Per-Platform Patterns
+### Per-platform patterns
 
 When a project uses inconsistent naming across platforms, use `patterns` to provide platform-specific overrides keyed by `goos_goarch`. The `pattern` field serves as the default fallback:
 
@@ -189,10 +178,11 @@ linux_amd64 = "nvim-linux-x86_64.tar.gz"
 ```
 
 Resolution order:
-1. If `patterns` has a key matching the current `os_arch` (e.g., `darwin_arm64`), use that pattern
-2. Otherwise, fall back to `pattern` (with template variable expansion)
 
-### Binary Renaming
+1. If `patterns` has a key matching the current `os_arch` (e.g., `darwin_arm64`), use that pattern.
+2. Otherwise, fall back to `pattern` (with template variable expansion).
+
+### Binary renaming
 
 When a downloaded binary or extracted file has a platform-specific name but you want a clean symlink, use the `source:link` syntax in `bin`. Template variables are supported in `bin` specs:
 
@@ -204,7 +194,7 @@ bin = ["jq-{{platform}}-{{arch}}:jq"]
 bin = ["direnv.{{os}}-{{arch}}:direnv"]
 ```
 
-### OS Filtering
+### OS filtering
 
 Use `os` to restrict a tool to specific operating systems. This is useful when you manage a tool through another package manager (e.g., Homebrew) on one OS but want `gh-tool` on others:
 
@@ -219,6 +209,27 @@ bin = ["nvim"]
 
 Values are Go-style OS names: `darwin`, `linux`, `windows`. If `os` is omitted, the tool installs on all platforms.
 
+### Ad-hoc installs (without a manifest entry)
+
+You can install one-off without touching the manifest — useful for trying a tool before committing to an entry:
+
+```sh
+gh tool install junegunn/fzf --pattern 'fzf-*-{{os}}_{{arch}}.tar.gz' --bin fzf
+```
+
+This does not modify the manifest; the install shows up in `gh tool list` as `orphan` until you add it. Run `gh tool add` afterwards if you want to persist it.
+
+### Alternate manifests
+
+`--file/-f` points `install` (and `add`) at a manifest other than the default:
+
+```sh
+gh tool install --file ./tools.toml
+gh tool add --file ./laptop.toml sharkdp/bat
+```
+
+State always lives under `~/.local/state/gh-tool/` regardless of which manifest you load.
+
 ## Commands
 
 ```
@@ -227,46 +238,40 @@ gh tool install [owner/repo]    Reconcile from manifest, or install a single too
 gh tool remove <owner/repo>     Remove an installed tool (manifest is not modified)
 gh tool list                    List installed tools and any drift from the manifest
 gh tool upgrade [owner/repo]    Upgrade to latest release (state-driven)
+gh tool reset                   Remove all installed tools and clear gh-tool data
 gh tool cache list              Show cached downloads
 gh tool cache clean [tool]      Remove cached downloads
 gh tool shell <bash|zsh|fish>   Print shell integration config
 gh tool version                 Print version
 ```
 
-`add` flags: `--file/-f`, `--tag/-t`, `--no-write` (preview the generated block without saving).
-`install` flags: `--pattern/-p`, `--tag/-t`, `--bin`, `--man`, `--completion`, `--no-verify`, `--force`, `--file/-f`.
+Notable flags:
 
-### List status values
+- `add`: `--file/-f`, `--tag/-t`, `--no-write` (preview the generated block without saving).
+- `install`: `--pattern/-p`, `--tag/-t`, `--bin`, `--man`, `--completion`, `--no-verify`, `--force`, `--file/-f`, `--jobs/-j`, `--no-progress`, `--verbose/-v`.
+- `upgrade`: `--jobs/-j`, `--no-progress`, `--verbose/-v`.
+- `reset`: `--yes/-y`.
 
-| Status             | Meaning |
-|--------------------|---------|
-| `up to date`       | Installed, on the latest release, matches the manifest spec |
-| `update available` | Installed, but a newer release exists |
+### `gh tool list` status values
+
+| Status             | Meaning                                                                |
+|--------------------|------------------------------------------------------------------------|
+| `up to date`       | Installed, on the latest release, matches the manifest spec            |
+| `update available` | Installed, but a newer release exists                                  |
 | `drift`            | Installed spec differs from the manifest spec — run `gh tool install --force` |
-| `orphan`           | Installed but not in the manifest |
-| `pending`          | In the manifest but not installed |
-| `skipped (os)`     | In the manifest, filtered out by `os` on this platform |
+| `orphan`           | Installed but not in the manifest                                      |
+| `pending`          | In the manifest but not installed                                      |
+| `skipped (os)`     | In the manifest, filtered out by `os` on this platform                 |
 
-## How It Works
+## How it works
 
-1. `gh tool install` downloads a release asset via `gh release download` into a cache directory
-2. The asset is verified with `gh attestation verify` (best-effort — most repos don't publish attestations yet)
-3. Archives (tar.gz, tar.xz, zip) are extracted; bare binaries are copied directly. If an archive has a single top-level directory, it is stripped automatically
-4. Symlinks are created from `$XDG_DATA_HOME/gh-tool/bin/` into the extracted tool directory. Use `source:link` in `bin` to rename binaries (e.g., `jq-macos-arm64:jq`)
-5. A state file under `$XDG_STATE_HOME/gh-tool/<name>.toml` records the installed tag, the resolved download pattern, and the symlinked `bin`/`man`/`completions`. `list`, `remove`, and `upgrade` operate from these state files; the manifest is only consulted by `install` (and by `list` for drift reporting).
+1. `gh tool install` downloads a release asset via `gh release download` into a cache directory.
+2. The asset is verified with `gh attestation verify` (best-effort — most repos don't publish attestations yet).
+3. Archives (`tar.gz`, `tar.xz`, `zip`) are extracted; bare binaries are copied directly. If an archive has a single top-level directory, it is stripped automatically.
+4. Symlinks are created from `~/.local/share/gh-tool/bin/` into the extracted tool directory. Use `source:link` in `bin` to rename binaries (e.g., `jq-macos-arm64:jq`).
+5. A state file under `~/.local/state/gh-tool/<name>.toml` records the installed tag, the resolved download pattern, and the symlinked `bin`/`man`/`completions`. `list`, `remove`, and `upgrade` operate from these state files; the manifest is only consulted by `install` (and by `list` for drift reporting).
 
-## Migration
-
-If you are upgrading from an earlier version of gh-tool, run this once to
-refresh state files into the new schema (which now also records the
-symlinked `bin`/`man`/`completions` so list/upgrade/remove no longer need
-to consult the manifest):
-
-```sh
-gh tool install --force
-```
-
-## Filesystem Layout
+## Filesystem layout
 
 ```
 ~/.config/gh-tool/config.toml          Manifest (TOML)
@@ -278,6 +283,14 @@ gh tool install --force
 ```
 
 All paths respect XDG environment variables (`XDG_CONFIG_HOME`, `XDG_DATA_HOME`, `XDG_STATE_HOME`, `XDG_CACHE_HOME`).
+
+## Migration
+
+If you are upgrading from an earlier version of gh-tool, run this once to refresh state files into the new schema (which now also records the symlinked `bin`/`man`/`completions` so list/upgrade/remove no longer need to consult the manifest):
+
+```sh
+gh tool install --force
+```
 
 ## Development
 
