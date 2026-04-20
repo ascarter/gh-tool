@@ -77,14 +77,44 @@ func runUpgrade(cmd *cobra.Command, args []string) error {
 	checkJobs := make([]ui.Job, 0, len(states))
 	for _, s := range states {
 		s := s
+		var manifestTool *config.Tool
 		if cfg != nil {
-			tool.BackfillState(&s, cfg.FindTool(s.Repo))
+			manifestTool = cfg.FindTool(s.Repo)
+			tool.BackfillState(&s, manifestTool)
 		}
-		t := s.AsTool()
+		// Prefer the manifest entry when present so templated patterns
+		// (e.g. containing {{tag}}) re-resolve against the new tag. The
+		// state file only stores the *resolved* pattern from the previous
+		// install, which would be stale for the new version.
+		var t config.Tool
+		if manifestTool != nil {
+			t = *manifestTool
+		} else {
+			t = s.AsTool()
+		}
 		name := t.Name()
 
 		if !t.ShouldInstallOn(runtime.GOOS) {
 			fmt.Printf("%s %s skipped on %s\n", ui.IconBullet, name, runtime.GOOS)
+			continue
+		}
+
+		if manifestTool != nil && manifestTool.Tag != "" && manifestTool.Tag != "latest" {
+			pinnedTag := manifestTool.Tag
+			checkJobs = append(checkJobs, ui.Job{
+				Name: name,
+				Run: func() error {
+					latest, err := tool.LatestTag(t.Repo)
+					if err != nil || latest == "" || latest == pinnedTag {
+						if flagUpgradeVerbose {
+							fmt.Printf("%s %s pinned to %s\n", ui.IconBullet, name, pinnedTag)
+						}
+						return nil
+					}
+					fmt.Printf("%s %s pinned to %s %s\n", ui.Warn(ui.IconBullet), name, pinnedTag, ui.Warn(fmt.Sprintf("(%s available)", latest)))
+					return nil
+				},
+			})
 			continue
 		}
 
@@ -97,7 +127,9 @@ func runUpgrade(cmd *cobra.Command, args []string) error {
 					return nil // don't abort the batch
 				}
 				if s.Tag == latest {
-					fmt.Printf("%s %s up to date (%s)\n", ui.IconBullet, name, latest)
+					if flagUpgradeVerbose {
+						fmt.Printf("%s %s up to date (%s)\n", ui.IconBullet, name, latest)
+					}
 					return nil
 				}
 				mu.Lock()

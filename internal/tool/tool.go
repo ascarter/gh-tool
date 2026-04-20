@@ -133,7 +133,10 @@ func (m *Manager) DownloadAsset(t config.Tool) (assetPath, tag, resolvedPattern 
 	args := []string{"release", "download", tag, "-R", t.Repo, "-D", cacheDir, "-p", resolvedPattern, "--clobber"}
 
 	m.reporter.Stage(name, fmt.Sprintf("Downloading %s %s", t.Repo, tag))
-	if _, _, err := gh.Exec(args...); err != nil {
+	if _, stderr, err := gh.Exec(args...); err != nil {
+		if msg := strings.TrimSpace(stderr.String()); msg != "" {
+			return "", "", "", fmt.Errorf("downloading release: %w: %s", err, msg)
+		}
 		return "", "", "", fmt.Errorf("downloading release: %w", err)
 	}
 

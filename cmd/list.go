@@ -17,8 +17,8 @@ import (
 )
 
 var (
-	flagListLong     bool
-	flagListVersions bool
+	flagListOutdated bool
+	flagListPinned   bool
 )
 
 var listCmd = &cobra.Command{
@@ -29,8 +29,8 @@ var listCmd = &cobra.Command{
 }
 
 func init() {
-	listCmd.Flags().BoolVarP(&flagListLong, "long", "l", false, "show installed and latest versions in a table")
-	listCmd.Flags().BoolVar(&flagListVersions, "versions", false, "show installed version next to each tool")
+	listCmd.Flags().BoolVar(&flagListOutdated, "outdated", false, "show only tools with a newer release available")
+	listCmd.Flags().BoolVar(&flagListPinned, "pinned", false, "show only tools pinned to a specific tag")
 }
 
 func runList(cmd *cobra.Command, args []string) error {
@@ -52,37 +52,6 @@ func runList(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	if flagListLong {
-		return runListLong(cfg, states)
-	}
-
-	// Just installed tools, sorted by tool name.
-	sort.Slice(states, func(i, j int) bool {
-		return states[i].AsTool().Name() < states[j].AsTool().Name()
-	})
-
-	if flagListVersions {
-		// Right-pad names so versions line up.
-		maxName := 0
-		for _, s := range states {
-			if l := len(s.AsTool().Name()); l > maxName {
-				maxName = l
-			}
-		}
-		for _, s := range states {
-			fmt.Printf("%-*s  %s\n", maxName, s.AsTool().Name(), s.Tag)
-		}
-		return nil
-	}
-
-	for _, s := range states {
-		fmt.Println(s.AsTool().Name())
-	}
-	return nil
-}
-
-func runListLong(cfg *config.Config, states []tool.InstalledState) error {
-	_ = cfg
 	sort.Slice(states, func(i, j int) bool { return states[i].Repo < states[j].Repo })
 
 	repos := make([]string, 0, len(states))
@@ -98,6 +67,7 @@ func runListLong(cfg *config.Config, states []tool.InstalledState) error {
 	type listRow struct {
 		repo, installed, latest string
 		outdated                bool
+		pinned                  bool
 	}
 	rows := make([]listRow, 0, len(states))
 	for _, repo := range repos {
@@ -106,12 +76,38 @@ func runListLong(cfg *config.Config, states []tool.InstalledState) error {
 		if latest == "" {
 			latest = "?"
 		}
+		pinned := false
+		if m := cfg.FindTool(repo); m != nil && m.Tag != "" && m.Tag != "latest" {
+			pinned = true
+		}
+		installed := s.Tag
+		if pinned {
+			installed += " (pinned)"
+		}
 		rows = append(rows, listRow{
 			repo:      repo,
-			installed: s.Tag,
+			installed: installed,
 			latest:    latest,
 			outdated:  latest != "?" && latest != s.Tag,
+			pinned:    pinned,
 		})
+	}
+
+	if flagListOutdated || flagListPinned {
+		filtered := rows[:0]
+		for _, r := range rows {
+			if flagListOutdated && !r.outdated {
+				continue
+			}
+			if flagListPinned && !r.pinned {
+				continue
+			}
+			filtered = append(filtered, r)
+		}
+		rows = filtered
+		if len(rows) == 0 {
+			return nil
+		}
 	}
 
 	terminal := term.FromEnv()

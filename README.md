@@ -47,17 +47,14 @@ Your manifest now lives at `~/.config/gh-tool/config.toml` and is ready to commi
 ## Daily workflow
 
 ```sh
-# Just the names of installed tools.
+# Installed tools with their installed and latest available versions.
 gh tool list
 
-# Names with installed versions.
-gh tool list --versions
-
-# Table of installed tools with their installed and latest available versions.
-gh tool list --long
-
 # Just the tools that have a newer release available.
-gh tool outdated
+gh tool list --outdated
+
+# Just the tools pinned to a specific tag in the manifest.
+gh tool list --pinned
 
 # Pull latest releases for everything installed.
 gh tool upgrade
@@ -245,8 +242,7 @@ State always lives under `~/.local/state/gh-tool/` regardless of which manifest 
 gh tool add <owner/repo>        Interactively author a manifest entry (does not install)
 gh tool install [owner/repo]    Reconcile from manifest, or install a single tool
 gh tool remove <owner/repo>     Remove an installed tool (manifest is not modified)
-gh tool list                    List installed tool names; --versions adds versions, --long for the full table
-gh tool outdated                List installed tools with a newer release available
+gh tool list                    List installed tools with installed and latest versions
 gh tool upgrade [owner/repo]    Upgrade to latest release (state-driven)
 gh tool reset                   Remove all installed tools and clear gh-tool data
 gh tool cache list              Show cached downloads
@@ -259,7 +255,7 @@ Notable flags:
 
 - `add`: `--file/-f`, `--tag/-t`, `--no-write` (preview the generated block without saving).
 - `install`: `--pattern/-p`, `--tag/-t`, `--bin`, `--man`, `--completion`, `--no-verify`, `--force`, `--file/-f`, `--jobs/-j`, `--no-progress`, `--verbose/-v`.
-- `list`: `--versions`, `--long/-l`.
+- `list`: `--outdated`, `--pinned`.
 - `upgrade`: `--jobs/-j`, `--no-progress`, `--verbose/-v`.
 - `reset`: `--yes/-y`.
 
