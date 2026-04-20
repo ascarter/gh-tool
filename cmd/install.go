@@ -16,15 +16,11 @@ import (
 var installCmd = &cobra.Command{
 	Use:   "install [owner/repo]",
 	Short: "Install a tool from a GitHub release",
-	Long: `Install a tool from a GitHub release. Downloads the release asset,
-extracts it, and creates symlinks for binaries, man pages, and completions.
+	Long: `Install a tool from a GitHub release.
 
-With no arguments, reconciles the local install set against the manifest:
-installs anything missing, leaves up-to-date tools alone, and (with --force)
-reinstalls everything. Reconcile runs in parallel (--jobs to tune).
-
-The manifest is treated as a read-only input. To author a new manifest entry
-interactively, use "gh tool add <owner/repo>".`,
+With no arguments, reconciles the local install set against the manifest.
+With an argument, installs a single tool (use --pattern, --bin, etc. for
+ad-hoc installs not in the manifest).`,
 	RunE: runInstall,
 }
 
@@ -43,17 +39,17 @@ var (
 )
 
 func init() {
-	installCmd.Flags().StringVarP(&flagPattern, "pattern", "p", "", "glob pattern to match release asset (supports {{os}} and {{arch}})")
+	installCmd.Flags().StringVarP(&flagPattern, "pattern", "p", "", "release asset glob (supports {{os}} and {{arch}})")
 	installCmd.Flags().StringVarP(&flagTag, "tag", "t", "", "release tag (default: latest)")
 	installCmd.Flags().StringSliceVar(&flagBin, "bin", nil, "binary name(s) to symlink")
-	installCmd.Flags().StringSliceVar(&flagMan, "man", nil, "man page path(s) relative to extracted archive")
-	installCmd.Flags().StringSliceVar(&flagComp, "completion", nil, "completion file path(s) relative to extracted archive")
+	installCmd.Flags().StringSliceVar(&flagMan, "man", nil, "man page path(s) in archive")
+	installCmd.Flags().StringSliceVar(&flagComp, "completion", nil, "completion path(s) in archive")
 	installCmd.Flags().BoolVar(&flagNoVerify, "no-verify", false, "skip attestation verification")
-	installCmd.Flags().BoolVar(&flagForce, "force", false, "reinstall even if up-to-date, clearing stale symlinks and cache")
-	installCmd.Flags().StringVarP(&flagFile, "file", "f", "", "path to manifest file (default: $XDG_CONFIG_HOME/gh-tool/config.toml)")
-	installCmd.Flags().IntVarP(&flagJobs, "jobs", "j", 0, "number of parallel installs (default: min(8, NumCPU))")
-	installCmd.Flags().BoolVar(&flagNoProgress, "no-progress", false, "disable the live progress UI; print one line per event")
-	installCmd.Flags().BoolVarP(&flagVerbose, "verbose", "v", false, "log every step (download, verify, extract); default shows only the result line per tool")
+	installCmd.Flags().BoolVar(&flagForce, "force", false, "reinstall even if up-to-date")
+	installCmd.Flags().StringVarP(&flagFile, "file", "f", "", "manifest path (default: $XDG_CONFIG_HOME/gh-tool/config.toml)")
+	installCmd.Flags().IntVarP(&flagJobs, "jobs", "j", 0, "parallel installs (default: min(8, NumCPU))")
+	installCmd.Flags().BoolVar(&flagNoProgress, "no-progress", false, "disable the live progress UI")
+	installCmd.Flags().BoolVarP(&flagVerbose, "verbose", "v", false, "log every step (download, verify, extract)")
 }
 
 // manifestPath returns the manifest path honoring --file, falling back to the

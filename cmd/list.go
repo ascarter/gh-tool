@@ -29,8 +29,8 @@ var listCmd = &cobra.Command{
 }
 
 func init() {
-	listCmd.Flags().BoolVarP(&flagListLong, "long", "l", false, "show a table with installed and latest versions (one network call per tool)")
-	listCmd.Flags().BoolVar(&flagListVersions, "versions", false, "show installed version next to each tool name")
+	listCmd.Flags().BoolVarP(&flagListLong, "long", "l", false, "show installed and latest versions in a table")
+	listCmd.Flags().BoolVar(&flagListVersions, "versions", false, "show installed version next to each tool")
 }
 
 func runList(cmd *cobra.Command, args []string) error {

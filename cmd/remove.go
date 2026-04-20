@@ -14,13 +14,9 @@ var removeCmd = &cobra.Command{
 	Use:     "remove <owner/repo>",
 	Aliases: []string{"rm", "uninstall"},
 	Short:   "Remove an installed tool",
-	Long: `Remove an installed tool's symlinks, payload, cache, and state.
-
-The manifest is not modified. If the removed tool is still listed in the
-manifest, a hint is printed reminding you that 'gh tool install' would
-reinstall it.`,
-	Args: cobra.ExactArgs(1),
-	RunE: runRemove,
+	Long:    "Remove an installed tool's symlinks, payload, cache, and state. The manifest is not modified.",
+	Args:    cobra.ExactArgs(1),
+	RunE:    runRemove,
 }
 
 func runRemove(cmd *cobra.Command, args []string) error {

@@ -24,20 +24,9 @@ var flagResetYes bool
 var resetCmd = &cobra.Command{
 	Use:   "reset",
 	Short: "Remove all local gh-tool data and caches",
-	Long: `Return gh-tool to a pristine state.
-
-Reset removes every installed tool (symlinks, payloads, state, cache) and
-then wipes gh-tool's data, state, and cache directories.
-
-Your manifest at $XDG_CONFIG_HOME/gh-tool/config.toml is preserved so that
-'gh tool install' can restore everything later.
-
-Reset does not remove the gh-tool extension itself. If you also want the
-extension gone, run:
-
-    gh extension remove ascarter/gh-tool`,
-	Args: cobra.NoArgs,
-	RunE: runReset,
+	Long:  "Remove every installed tool and wipe gh-tool's data, state, and cache directories. The manifest is preserved.",
+	Args:  cobra.NoArgs,
+	RunE:  runReset,
 }
 
 func init() {

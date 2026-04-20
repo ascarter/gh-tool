@@ -22,20 +22,13 @@ var (
 var upgradeCmd = &cobra.Command{
 	Use:   "upgrade [owner/repo]",
 	Short: "Upgrade installed tools to the latest release",
-	Long: `Upgrade installed tools to the latest release.
-
-Drives off the local install state under $XDG_STATE_HOME/gh-tool/. The
-manifest is not consulted.
-
-With no arguments, upgrades all installed tools in parallel.
-With an argument, upgrades only the specified tool.`,
-	RunE: runUpgrade,
+	RunE:  runUpgrade,
 }
 
 func init() {
-	upgradeCmd.Flags().IntVarP(&flagUpgradeJobs, "jobs", "j", 0, "number of parallel upgrades (default: min(8, NumCPU))")
-	upgradeCmd.Flags().BoolVar(&flagUpgradeNoProgress, "no-progress", false, "disable the live progress UI; print one line per event")
-	upgradeCmd.Flags().BoolVarP(&flagUpgradeVerbose, "verbose", "v", false, "log every step (download, verify, extract); default shows only the result line per tool")
+	upgradeCmd.Flags().IntVarP(&flagUpgradeJobs, "jobs", "j", 0, "parallel upgrades (default: min(8, NumCPU))")
+	upgradeCmd.Flags().BoolVar(&flagUpgradeNoProgress, "no-progress", false, "disable the live progress UI")
+	upgradeCmd.Flags().BoolVarP(&flagUpgradeVerbose, "verbose", "v", false, "log every step (download, verify, extract)")
 	rootCmd.AddCommand(upgradeCmd)
 }
 

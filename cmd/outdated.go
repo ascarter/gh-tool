@@ -12,17 +12,8 @@ import (
 var outdatedCmd = &cobra.Command{
 	Use:   "outdated",
 	Short: "List tools with upgrades available",
-	Long: `List installed tools whose latest GitHub release is newer than the
-installed version.
-
-Each line is formatted as:
-
-    name (installed) < latest
-
-Drift (manifest spec changed) is reported separately by 'gh tool list --long'
-and is not surfaced here — outdated only checks for newer releases.`,
-	Args: cobra.NoArgs,
-	RunE: runOutdated,
+	Args:  cobra.NoArgs,
+	RunE:  runOutdated,
 }
 
 func init() {

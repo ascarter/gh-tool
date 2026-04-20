@@ -21,15 +21,9 @@ import (
 var addCmd = &cobra.Command{
 	Use:   "add <owner/repo>",
 	Short: "Add a tool to the manifest interactively",
-	Long: `Discover a release on GitHub, choose its assets and binary layout
-interactively, then write the resulting [[tool]] block into the manifest.
-
-Use this when you want to add a new tool without hand-editing the manifest.
-By default the tool is only added to the manifest; pass --install to also
-download and install it in the same step.
-
-For non-interactive use, run "gh tool install <repo> --pattern ..." with
-the values you want.`,
+	Long: `Inspect a GitHub release, pick its assets and binary layout interactively,
+and write a [[tool]] block to the manifest. Pass --install to also install
+it in the same step.`,
 	Args: cobra.ExactArgs(1),
 	RunE: runAdd,
 }
@@ -42,10 +36,10 @@ var (
 )
 
 func init() {
-	addCmd.Flags().StringVarP(&flagAddFile, "file", "f", "", "path to manifest file (default: $XDG_CONFIG_HOME/gh-tool/config.toml)")
-	addCmd.Flags().StringVarP(&flagAddTag, "tag", "t", "", "release tag to inspect (default: latest)")
-	addCmd.Flags().BoolVar(&flagAddNoWrite, "no-write", false, "print the generated [[tool]] block without writing the manifest")
-	addCmd.Flags().BoolVar(&flagAddInstall, "install", false, "install the tool after writing the manifest entry")
+	addCmd.Flags().StringVarP(&flagAddFile, "file", "f", "", "manifest path (default: $XDG_CONFIG_HOME/gh-tool/config.toml)")
+	addCmd.Flags().StringVarP(&flagAddTag, "tag", "t", "", "release tag (default: latest)")
+	addCmd.Flags().BoolVar(&flagAddNoWrite, "no-write", false, "print the [[tool]] block without writing")
+	addCmd.Flags().BoolVar(&flagAddInstall, "install", false, "install after writing the manifest entry")
 	rootCmd.AddCommand(addCmd)
 }
 
