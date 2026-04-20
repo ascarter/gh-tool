@@ -11,7 +11,7 @@ import (
 
 var outdatedCmd = &cobra.Command{
 	Use:   "outdated",
-	Short: "List installed tools that have a newer release available",
+	Short: "List tools with upgrades available",
 	Long: `List installed tools whose latest GitHub release is newer than the
 installed version.
 

@@ -12,11 +12,18 @@ var version = "dev"
 
 var rootCmd = &cobra.Command{
 	Use:   "gh-tool",
-	Short: "Install tools from GitHub releases",
-	Long:  "A GitHub CLI extension for installing and managing binary tools from GitHub releases.",
+	Short: "Install and manage binary tools from GitHub releases.",
+	Long:  "Install and manage binary tools from GitHub releases.",
 }
 
 func Execute() error {
+	rootCmd.InitDefaultCompletionCmd()
+	for _, c := range rootCmd.Commands() {
+		if c.Name() == "completion" {
+			c.Short = "Generate shell completion script"
+			break
+		}
+	}
 	return rootCmd.Execute()
 }
 

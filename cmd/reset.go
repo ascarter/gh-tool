@@ -23,7 +23,7 @@ var flagResetYes bool
 
 var resetCmd = &cobra.Command{
 	Use:   "reset",
-	Short: "Remove all installed tools and clear gh-tool data",
+	Short: "Remove all local gh-tool data and caches",
 	Long: `Return gh-tool to a pristine state.
 
 Reset removes every installed tool (symlinks, payloads, state, cache) and
