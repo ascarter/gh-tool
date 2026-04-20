@@ -301,14 +301,6 @@ make vet        # Run go vet
 make clean      # Remove binary and caches
 ```
 
-### Release
-
-```sh
-make release TAG=v0.1.0
-```
-
-This creates a GitHub release. The CI workflow cross-compiles for all platforms and uploads binaries automatically.
-
 ## License
 
 MIT
