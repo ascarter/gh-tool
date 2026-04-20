@@ -47,8 +47,17 @@ Your manifest now lives at `~/.config/gh-tool/config.toml` and is ready to commi
 ## Daily workflow
 
 ```sh
-# See what's installed, what's on latest, and any drift.
+# Just the names of installed tools.
 gh tool list
+
+# Names with installed versions.
+gh tool list --versions
+
+# Table of installed tools with their installed and latest available versions.
+gh tool list --long
+
+# Just the tools that have a newer release available.
+gh tool outdated
 
 # Pull latest releases for everything installed.
 gh tool upgrade
@@ -94,7 +103,7 @@ If you want a truly clean slate (including the manifest), delete `~/.config/gh-t
 
 ## Manifest reference
 
-`gh tool add` is the easiest way to author manifest entries, but you can also edit `~/.config/gh-tool/config.toml` directly. The manifest is a **read-only input** — like a Brewfile. `gh tool install` reads it; only `gh tool add` writes it. Your local install set is tracked separately in per-tool state files under `~/.local/state/gh-tool/`.
+`gh tool add` is the easiest way to author manifest entries, but you can also edit `~/.config/gh-tool/config.toml` directly. The manifest is a **read-only input**: `gh tool install` reads it; only `gh tool add` writes it. Your local install set is tracked separately in per-tool state files under `~/.local/state/gh-tool/`.
 
 ```toml
 [[tool]]
@@ -196,10 +205,10 @@ bin = ["direnv.{{os}}-{{arch}}:direnv"]
 
 ### OS filtering
 
-Use `os` to restrict a tool to specific operating systems. This is useful when you manage a tool through another package manager (e.g., Homebrew) on one OS but want `gh-tool` on others:
+Use `os` to restrict a tool to specific operating systems. This is useful when you manage a tool through a different package manager on one OS but want `gh-tool` on others:
 
 ```toml
-# Only install neovim on Linux (use Homebrew on macOS)
+# Only install neovim on Linux (use a system package manager on macOS)
 [[tool]]
 repo = "neovim/neovim"
 pattern = "nvim-linux-{{gnuarch}}.tar.gz"
@@ -236,7 +245,8 @@ State always lives under `~/.local/state/gh-tool/` regardless of which manifest 
 gh tool add <owner/repo>        Interactively author a manifest entry (does not install)
 gh tool install [owner/repo]    Reconcile from manifest, or install a single tool
 gh tool remove <owner/repo>     Remove an installed tool (manifest is not modified)
-gh tool list                    List installed tools and any drift from the manifest
+gh tool list                    List installed tool names; --versions adds versions, --long for the full table
+gh tool outdated                List installed tools with a newer release available
 gh tool upgrade [owner/repo]    Upgrade to latest release (state-driven)
 gh tool reset                   Remove all installed tools and clear gh-tool data
 gh tool cache list              Show cached downloads
@@ -249,19 +259,9 @@ Notable flags:
 
 - `add`: `--file/-f`, `--tag/-t`, `--no-write` (preview the generated block without saving).
 - `install`: `--pattern/-p`, `--tag/-t`, `--bin`, `--man`, `--completion`, `--no-verify`, `--force`, `--file/-f`, `--jobs/-j`, `--no-progress`, `--verbose/-v`.
+- `list`: `--versions`, `--long/-l`.
 - `upgrade`: `--jobs/-j`, `--no-progress`, `--verbose/-v`.
 - `reset`: `--yes/-y`.
-
-### `gh tool list` status values
-
-| Status             | Meaning                                                                |
-|--------------------|------------------------------------------------------------------------|
-| `up to date`       | Installed, on the latest release, matches the manifest spec            |
-| `update available` | Installed, but a newer release exists                                  |
-| `drift`            | Installed spec differs from the manifest spec — run `gh tool install --force` |
-| `orphan`           | Installed but not in the manifest                                      |
-| `pending`          | In the manifest but not installed                                      |
-| `skipped (os)`     | In the manifest, filtered out by `os` on this platform                 |
 
 ## How it works
 

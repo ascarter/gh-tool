@@ -3,9 +3,8 @@ package cmd
 import (
 	"fmt"
 	"os"
-	"reflect"
-	"runtime"
 	"sort"
+	"strings"
 	"sync"
 
 	"github.com/cli/go-gh/v2/pkg/tableprinter"
@@ -17,22 +16,21 @@ import (
 	"github.com/ascarter/gh-tool/internal/ui"
 )
 
+var (
+	flagListLong     bool
+	flagListVersions bool
+)
+
 var listCmd = &cobra.Command{
 	Use:     "list",
 	Aliases: []string{"ls"},
 	Short:   "List installed tools",
-	Long: `List installed tools with their version, the latest available release,
-and a status that captures any drift between the local install and the
-manifest.
+	RunE:    runList,
+}
 
-Status values:
-  up to date         installed, on latest release, matches manifest
-  update available   installed, but a newer release exists
-  drift              installed spec differs from manifest spec; run 'gh tool install --force'
-  orphan             installed but not present in the manifest
-  pending            in manifest but not installed
-  skipped (os)       in manifest, filtered out by 'os' on this platform`,
-	RunE: runList,
+func init() {
+	listCmd.Flags().BoolVarP(&flagListLong, "long", "l", false, "show a table with installed and latest versions (one network call per tool)")
+	listCmd.Flags().BoolVar(&flagListVersions, "versions", false, "show installed version next to each tool name")
 }
 
 func runList(cmd *cobra.Command, args []string) error {
@@ -54,29 +52,67 @@ func runList(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	// Build lookup tables.
-	stateByRepo := make(map[string]tool.InstalledState, len(states))
-	for _, s := range states {
-		stateByRepo[s.Repo] = s
-	}
-	manifestByRepo := make(map[string]config.Tool, len(cfg.Tools))
-	for _, t := range cfg.Tools {
-		manifestByRepo[t.Repo] = t
+	if flagListLong {
+		return runListLong(cfg, states)
 	}
 
-	// Union of repos, sorted.
-	repoSet := make(map[string]struct{})
-	for r := range stateByRepo {
-		repoSet[r] = struct{}{}
+	// Just installed tools, sorted by tool name.
+	sort.Slice(states, func(i, j int) bool {
+		return states[i].AsTool().Name() < states[j].AsTool().Name()
+	})
+
+	if flagListVersions {
+		// Right-pad names so versions line up.
+		maxName := 0
+		for _, s := range states {
+			if l := len(s.AsTool().Name()); l > maxName {
+				maxName = l
+			}
+		}
+		for _, s := range states {
+			fmt.Printf("%-*s  %s\n", maxName, s.AsTool().Name(), s.Tag)
+		}
+		return nil
 	}
-	for r := range manifestByRepo {
-		repoSet[r] = struct{}{}
+
+	for _, s := range states {
+		fmt.Println(s.AsTool().Name())
 	}
-	repos := make([]string, 0, len(repoSet))
-	for r := range repoSet {
-		repos = append(repos, r)
+	return nil
+}
+
+func runListLong(cfg *config.Config, states []tool.InstalledState) error {
+	_ = cfg
+	sort.Slice(states, func(i, j int) bool { return states[i].Repo < states[j].Repo })
+
+	repos := make([]string, 0, len(states))
+	stateByRepo := make(map[string]tool.InstalledState, len(states))
+	for _, s := range states {
+		repos = append(repos, s.Repo)
+		stateByRepo[s.Repo] = s
 	}
-	sort.Strings(repos)
+
+	// Fan out LatestTag in parallel — the only network call in `list`.
+	latestByRepo := fetchLatestTags(repos, stateByRepo)
+
+	type listRow struct {
+		repo, installed, latest string
+		outdated                bool
+	}
+	rows := make([]listRow, 0, len(states))
+	for _, repo := range repos {
+		s := stateByRepo[repo]
+		latest := latestByRepo[repo]
+		if latest == "" {
+			latest = "?"
+		}
+		rows = append(rows, listRow{
+			repo:      repo,
+			installed: s.Tag,
+			latest:    latest,
+			outdated:  latest != "?" && latest != s.Tag,
+		})
+	}
 
 	terminal := term.FromEnv()
 	w, _, _ := terminal.Size()
@@ -85,46 +121,45 @@ func runList(cmd *cobra.Command, args []string) error {
 	}
 	tp := tableprinter.New(os.Stdout, terminal.IsTerminalOutput(), w)
 
+	maxRepo := len("REPO")
+	maxInst := len("INSTALLED")
+	maxLatest := len("LATEST")
+	for _, r := range rows {
+		if l := len(r.repo); l > maxRepo {
+			maxRepo = l
+		}
+		if l := len(r.installed); l > maxInst {
+			maxInst = l
+		}
+		if l := len(r.latest); l > maxLatest {
+			maxLatest = l
+		}
+	}
+
 	tp.AddField("REPO")
 	tp.AddField("INSTALLED")
 	tp.AddField("LATEST")
-	tp.AddField("STATUS")
+	tp.EndRow()
+	tp.AddField(strings.Repeat("-", maxRepo))
+	tp.AddField(strings.Repeat("-", maxInst))
+	tp.AddField(strings.Repeat("-", maxLatest))
 	tp.EndRow()
 
-	// Fan out LatestTag for installed tools in parallel — this is the
-	// only network call in `list` and dominates wall time for large
-	// manifests.
-	latestByRepo := fetchLatestTags(repos, stateByRepo)
-
-	for _, repo := range repos {
-		state, installed := stateByRepo[repo]
-		manifest, inManifest := manifestByRepo[repo]
-
-		// Pending or skipped — not installed.
-		if !installed {
-			if !manifest.ShouldInstallOn(runtime.GOOS) {
-				row(tp, repo, "-", "-", "skipped (os)")
-				continue
-			}
-			row(tp, repo, "-", "-", "pending")
-			continue
+	for _, r := range rows {
+		tp.AddField(r.repo)
+		tp.AddField(r.installed)
+		if r.outdated {
+			tp.AddField(r.latest, tableprinter.WithColor(ui.Warn))
+		} else {
+			tp.AddField(r.latest)
 		}
-
-		latest := latestByRepo[repo]
-		if latest == "" {
-			latest = "?"
-		}
-
-		status := classifyInstalled(state, manifest, inManifest, latest)
-		row(tp, repo, state.Tag, latest, status)
+		tp.EndRow()
 	}
 
 	return tp.Render()
 }
 
-// fetchLatestTags resolves LatestTag for every repo that is locally
-// installed, in parallel. Repos without an installed state are not queried
-// (they appear as "pending" and don't need the LATEST column).
+// fetchLatestTags resolves LatestTag for every installed repo in parallel.
 func fetchLatestTags(repos []string, stateByRepo map[string]tool.InstalledState) map[string]string {
 	out := map[string]string{}
 	var mu sync.Mutex
@@ -157,55 +192,3 @@ func fetchLatestTags(repos []string, stateByRepo map[string]tool.InstalledState)
 	return out
 }
 
-func row(tp tableprinter.TablePrinter, repo, installed, latest, status string) {
-	tp.AddField(repo)
-	tp.AddField(installed)
-	tp.AddField(latest)
-	tp.AddField(status)
-	tp.EndRow()
-}
-
-// classifyInstalled returns the STATUS column value for an installed tool.
-func classifyInstalled(state tool.InstalledState, manifest config.Tool, inManifest bool, latest string) string {
-	if !inManifest {
-		return "orphan"
-	}
-	if specDriftsFromManifest(state, manifest) {
-		return "drift"
-	}
-	if latest != "?" && state.Tag != latest {
-		return "update available"
-	}
-	return "up to date"
-}
-
-// specDriftsFromManifest reports whether the installed state was produced by
-// a manifest spec different from the current manifest entry for the same
-// repo. Compares the manifest's resolved pattern (for this host) and the
-// per-tool fields actually persisted in state.
-func specDriftsFromManifest(state tool.InstalledState, manifest config.Tool) bool {
-	manifestResolved := tool.ExpandPattern(manifest.ResolvePattern(runtime.GOOS, runtime.GOARCH), state.Tag)
-	if state.Pattern != "" && manifestResolved != "" && state.Pattern != manifestResolved {
-		return true
-	}
-	if !sliceEqualOrEmpty(state.Bin, manifest.Bin) {
-		return true
-	}
-	if !sliceEqualOrEmpty(state.Man, manifest.Man) {
-		return true
-	}
-	if !sliceEqualOrEmpty(state.Completions, manifest.Completions) {
-		return true
-	}
-	return false
-}
-
-// sliceEqualOrEmpty returns true if the slices are equal, or if the state
-// slice is empty (treated as "not recorded — no opinion") regardless of the
-// manifest slice.
-func sliceEqualOrEmpty(stateSlice, manifestSlice []string) bool {
-	if len(stateSlice) == 0 {
-		return true
-	}
-	return reflect.DeepEqual(stateSlice, manifestSlice)
-}

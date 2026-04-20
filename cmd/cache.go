@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/cli/go-gh/v2/pkg/tableprinter"
 	"github.com/cli/go-gh/v2/pkg/term"
@@ -49,7 +50,23 @@ func runCacheList(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	if len(entries) == 0 {
+	type row struct {
+		name  string
+		size  int64
+		count int
+	}
+	var rows []row
+	var totalSize int64
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		size, count := dirStats(filepath.Join(dirs.Cache, entry.Name()))
+		rows = append(rows, row{entry.Name(), size, count})
+		totalSize += size
+	}
+
+	if len(rows) == 0 {
 		fmt.Println("Cache is empty.")
 		return nil
 	}
@@ -61,25 +78,55 @@ func runCacheList(cmd *cobra.Command, args []string) error {
 	}
 	tp := tableprinter.New(os.Stdout, terminal.IsTerminalOutput(), w)
 
+	// Compute column widths so the divider row matches each header.
+	maxName := len("TOOL")
+	maxSize := len("SIZE")
+	maxFiles := len("FILES")
+	formatted := make([]struct {
+		name, size, files string
+	}, len(rows))
+	for i, r := range rows {
+		formatted[i].name = r.name
+		formatted[i].size = formatSize(r.size)
+		formatted[i].files = fmt.Sprintf("%d", r.count)
+		if l := len(r.name); l > maxName {
+			maxName = l
+		}
+		if l := len(formatted[i].size); l > maxSize {
+			maxSize = l
+		}
+		if l := len(formatted[i].files); l > maxFiles {
+			maxFiles = l
+		}
+	}
+
 	tp.AddField("TOOL")
 	tp.AddField("SIZE")
 	tp.AddField("FILES")
 	tp.EndRow()
+	tp.AddField(strings.Repeat("-", maxName))
+	tp.AddField(strings.Repeat("-", maxSize))
+	tp.AddField(strings.Repeat("-", maxFiles))
+	tp.EndRow()
 
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
-		toolCacheDir := filepath.Join(dirs.Cache, entry.Name())
-		size, count := dirStats(toolCacheDir)
-
-		tp.AddField(entry.Name())
-		tp.AddField(formatSize(size))
-		tp.AddField(fmt.Sprintf("%d", count))
+	for _, f := range formatted {
+		tp.AddField(f.name)
+		tp.AddField(f.size)
+		tp.AddField(fmt.Sprintf("%*s", maxFiles, f.files))
 		tp.EndRow()
 	}
 
-	return tp.Render()
+	if err := tp.Render(); err != nil {
+		return err
+	}
+
+	noun := "tools"
+	if len(rows) == 1 {
+		noun = "tool"
+	}
+	fmt.Printf("\n%d cached %s, %s total\n",
+		len(rows), noun, strings.TrimSpace(formatSize(totalSize)))
+	return nil
 }
 
 func runCacheClean(cmd *cobra.Command, args []string) error {
@@ -113,6 +160,10 @@ func dirStats(dir string) (totalSize int64, fileCount int) {
 	return
 }
 
+// formatSize renders a byte count with a fixed-width numeric portion so
+// values line up vertically when emitted in a table column. The numeric
+// part is right-padded to 5 characters ("999.9") and followed by a 2-char
+// unit (B, KB, MB, GB).
 func formatSize(bytes int64) string {
 	const (
 		kb = 1024
@@ -121,12 +172,12 @@ func formatSize(bytes int64) string {
 	)
 	switch {
 	case bytes >= gb:
-		return fmt.Sprintf("%.1f GB", float64(bytes)/float64(gb))
+		return fmt.Sprintf("%5.1f GB", float64(bytes)/float64(gb))
 	case bytes >= mb:
-		return fmt.Sprintf("%.1f MB", float64(bytes)/float64(mb))
+		return fmt.Sprintf("%5.1f MB", float64(bytes)/float64(mb))
 	case bytes >= kb:
-		return fmt.Sprintf("%.1f KB", float64(bytes)/float64(kb))
+		return fmt.Sprintf("%5.1f KB", float64(bytes)/float64(kb))
 	default:
-		return fmt.Sprintf("%d B", bytes)
+		return fmt.Sprintf("%5d B ", bytes)
 	}
 }

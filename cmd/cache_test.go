@@ -11,13 +11,13 @@ func TestFormatSize(t *testing.T) {
 		bytes int64
 		want  string
 	}{
-		{0, "0 B"},
-		{500, "500 B"},
-		{1024, "1.0 KB"},
-		{1536, "1.5 KB"},
-		{1024 * 1024, "1.0 MB"},
-		{int64(2.5 * 1024 * 1024), "2.5 MB"},
-		{1024 * 1024 * 1024, "1.0 GB"},
+		{0, "    0 B "},
+		{500, "  500 B "},
+		{1024, "  1.0 KB"},
+		{1536, "  1.5 KB"},
+		{1024 * 1024, "  1.0 MB"},
+		{int64(2.5 * 1024 * 1024), "  2.5 MB"},
+		{1024 * 1024 * 1024, "  1.0 GB"},
 	}
 	for _, tt := range tests {
 		if got := formatSize(tt.bytes); got != tt.want {
