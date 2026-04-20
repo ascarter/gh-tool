@@ -40,25 +40,23 @@ define check_release_ready
 	fi
 endef
 
+# do_release BUMP_AWK — shared release recipe parameterized by an awk
+# expression that prints the next tag given the current one on stdin.
+define do_release
+	$(check_release_ready)
+	$(eval LATEST_TAG := $(or $(call latest_tag),v0.0.0))
+	$(eval NEXT_TAG := $(shell echo $(LATEST_TAG) | awk -F. '$(1)'))
+	@echo "releasing $(NEXT_TAG) (was $(LATEST_TAG))"
+	gh release create $(NEXT_TAG) --generate-notes
+endef
+
 release: release-patch
 
 release-patch: test vet
-	$(check_release_ready)
-	$(eval LATEST_TAG := $(or $(call latest_tag),v0.0.0))
-	$(eval NEXT_TAG := $(shell echo $(LATEST_TAG) | awk -F. '{print $$1"."$$2"."$$3+1}'))
-	@echo "releasing $(NEXT_TAG) (was $(LATEST_TAG))"
-	gh release create $(NEXT_TAG) --generate-notes
+	$(call do_release,{print $$1"."$$2"."$$3+1})
 
 release-minor: test vet
-	$(check_release_ready)
-	$(eval LATEST_TAG := $(or $(call latest_tag),v0.0.0))
-	$(eval NEXT_TAG := $(shell echo $(LATEST_TAG) | awk -F. '{print $$1"."$$2+1".0"}'))
-	@echo "releasing $(NEXT_TAG) (was $(LATEST_TAG))"
-	gh release create $(NEXT_TAG) --generate-notes
+	$(call do_release,{print $$1"."$$2+1".0"})
 
 release-major: test vet
-	$(check_release_ready)
-	$(eval LATEST_TAG := $(or $(call latest_tag),v0.0.0))
-	$(eval NEXT_TAG := $(shell echo $(LATEST_TAG) | awk -F. '{gsub(/^v/,"",$$1); print "v"$$1+1".0.0"}'))
-	@echo "releasing $(NEXT_TAG) (was $(LATEST_TAG))"
-	gh release create $(NEXT_TAG) --generate-notes
+	$(call do_release,{gsub(/^v/,"",$$1); print "v"$$1+1".0.0"})
