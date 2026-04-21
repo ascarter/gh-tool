@@ -24,11 +24,6 @@ export GH_TOKEN="$(gh auth token)"
 Build and run either image. The build context must be this `examples/` directory (the Dockerfiles `COPY` `config.toml` and `install.sh` from it). The token is passed as a [BuildKit secret][buildkit-secret] (`--secret id=gh_token,env=GH_TOKEN`) so it never lands in image layers or `docker history`:
 
 ```sh
-# From the repo root
-docker build -f examples/Dockerfile.ubuntu --secret id=gh_token,env=GH_TOKEN -t gh-tool-ubuntu examples
-docker build -f examples/Dockerfile.fedora --secret id=gh_token,env=GH_TOKEN -t gh-tool-fedora examples
-
-# Or from inside examples/
 cd examples
 docker build -f Dockerfile.ubuntu --secret id=gh_token,env=GH_TOKEN -t gh-tool-ubuntu .
 docker build -f Dockerfile.fedora --secret id=gh_token,env=GH_TOKEN -t gh-tool-fedora .
@@ -45,7 +40,48 @@ docker run --rm -it gh-tool-fedora bash -lc 'fzf --version && rg --version && jq
 
 > **Note on the token:** the token is mounted as a BuildKit secret and never appears in the image or in `docker history`. The `--secret id=gh_token,env=GH_TOKEN` form reads from the `GH_TOKEN` env var on your host.
 
-## Bind-mounting your own manifest
+## Trimming image size
+
+The example Dockerfiles keep the download cache around so subsequent `gh tool install` / `gh tool upgrade` runs in the container don't need to re-download. If you want a smaller, immutable image, you have two options.
+
+### Option A — drop the cache in the same layer
+
+Append a `gh tool cache clean` to the bootstrap `RUN` so the cache never lands in the image layer:
+
+```dockerfile
+RUN --mount=type=secret,id=gh_token \
+    GH_TOKEN="$(cat /run/secrets/gh_token)" gh-tool-bootstrap /etc/gh-tool/config.toml && \
+    gh tool cache clean
+```
+
+Smallest delta from the existing example. Keeps `gh`, the `gh-tool` extension, and the manifest in the image — useful if you want to upgrade or add tools at runtime.
+
+### Option B — multi-stage: copy only the installed tools
+
+Use a builder stage that has `gh` and the extension, then copy just `$GHTOOL_HOME/data/bin` and `$GHTOOL_HOME/data/tools` into a minimal runtime image. The runtime image doesn't need `gh` at all:
+
+```dockerfile
+# syntax=docker/dockerfile:1.7
+FROM ubuntu:24.04 AS builder
+ENV DEBIAN_FRONTEND=noninteractive GHTOOL_HOME=/opt/gh-tool
+# ... (install gh + extension as in Dockerfile.ubuntu) ...
+COPY config.toml /etc/gh-tool/config.toml
+COPY install.sh  /usr/local/bin/gh-tool-bootstrap
+RUN chmod +x /usr/local/bin/gh-tool-bootstrap
+RUN --mount=type=secret,id=gh_token \
+    GH_TOKEN="$(cat /run/secrets/gh_token)" gh-tool-bootstrap /etc/gh-tool/config.toml
+
+FROM ubuntu:24.04
+ENV PATH=/opt/gh-tool/data/bin:/usr/local/bin:/usr/bin:/bin
+COPY --from=builder /opt/gh-tool/data /opt/gh-tool/data
+CMD ["bash"]
+```
+
+Smallest runtime image. Good for distributing a fixed toolchain. You can't add or upgrade tools inside the running container — rebuild instead.
+
+Pick A when the container is a workstation you'll iterate in. Pick B when it's an immutable artifact (CI runner image, sealed agent base, etc.).
+
+
 
 To install your own toolset instead of the sample, build the image once, then mount your manifest at runtime and re-run the bootstrap:
 
