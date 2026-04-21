@@ -17,3 +17,5 @@ jobs:
         with:
           generate_attestations: true
           go_version_file: go.mod
+          go_build_options: >-
+            -ldflags=-X=github.com/ascarter/gh-tool/cmd.version=${{ github.ref_name }}
