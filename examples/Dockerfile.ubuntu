@@ -27,7 +27,7 @@ RUN apt-get update && \
 COPY config.toml /etc/gh-tool/config.toml
 COPY install.sh  /usr/local/bin/gh-tool-bootstrap
 RUN chmod +x /usr/local/bin/gh-tool-bootstrap
-RUN --mount=type=secret,id=gh_token,env=GH_TOKEN \
-    gh-tool-bootstrap /etc/gh-tool/config.toml
+RUN --mount=type=secret,id=gh_token \
+    GH_TOKEN="$(cat /run/secrets/gh_token)" gh-tool-bootstrap /etc/gh-tool/config.toml
 
 CMD ["bash"]
