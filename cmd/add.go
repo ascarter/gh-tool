@@ -134,7 +134,7 @@ or edit your manifest directly.`, args[0])
 		return err
 	}
 
-	bins, err := chooseAddBins(layout, repo, inspectAssetName, fold.Pattern)
+	bins, err := chooseAddBins(layout, repo, inspectAssetName, fold.Pattern, inspectKey)
 	if err != nil {
 		return err
 	}
@@ -416,7 +416,7 @@ func confirmAddPattern(fold *discover.FoldResult, tag string, chosen map[discove
 //
 //   - rename: if the resulting bin name does not match the repo name, offer
 //     to rename it (writing "source:reponame" in the manifest).
-func chooseAddBins(layout *discover.Layout, repo, inspectAssetName, foldedPattern string) ([]string, error) {
+func chooseAddBins(layout *discover.Layout, repo, inspectAssetName, foldedPattern string, inspectKey discover.PlatformKey) ([]string, error) {
 	_, name := config.SplitRepo(repo)
 	if len(layout.Executables) == 0 {
 		warnf("no executables detected in archive; you may need to set bin manually later.")
@@ -451,17 +451,24 @@ func chooseAddBins(layout *discover.Layout, repo, inspectAssetName, foldedPatter
 		// per-platform map — there is no single template to embed.
 		if bareBinary && foldedPattern != "" {
 			source = stripBinaryExt(foldedPattern)
+		} else if foldedPattern != "" {
+			// Archive case: the executable inside the archive may have a
+			// platform-specific name (e.g. "yq_linux_amd64"). Fold
+			// platform tokens into template variables so the bin entry
+			// works across platforms.
+			source = foldBinName(source, inspectKey)
 		}
 
 		// Offer to rename only when there's a single binary, the basename
 		// doesn't match the tool name, AND the basename contains a
-		// separator (dash or underscore). That last condition skips the
-		// prompt for short ad-hoc names like "btm" → "bottom" or "rg" →
-		// "ripgrep" while still catching platform-encoded names like
-		// "jq-macos-arm64" or "tool_v1_linux".
+		// separator (dash, underscore, or template braces). That last
+		// condition skips the prompt for short ad-hoc names like
+		// "btm" → "bottom" or "rg" → "ripgrep" while still catching
+		// platform-encoded names like "jq-macos-arm64" or
+		// "yq_{{os}}_{{arch}}".
 		linkName := source
 		base := filepath.Base(source)
-		hasSep := strings.ContainsAny(base, "-_")
+		hasSep := strings.ContainsAny(base, "-_{")
 		if len(picked) == 1 && hasSep && !strings.EqualFold(base, name) {
 			var rename bool
 			if err := promptConfirm(fmt.Sprintf("Rename symlink %q to %q?", base, name), true, &rename); err != nil {
@@ -479,6 +486,75 @@ func chooseAddBins(layout *discover.Layout, repo, inspectAssetName, foldedPatter
 		}
 	}
 	return out, nil
+}
+
+// foldBinName replaces platform-specific literals in an executable name
+// with template variables. For example, "yq_linux_amd64" inspected on
+// linux_amd64 becomes "yq_{{os}}_{{arch}}". Only substitutes tokens that
+// appear as delimited segments (bounded by start/end of string or
+// separators like - _ .) to avoid false positives.
+func foldBinName(name string, key discover.PlatformKey) string {
+	tokens := tool.Tokens(key.GOOS(), key.GOARCH(), "")
+
+	type sub struct {
+		pairs [][2]string
+	}
+	strategies := []sub{
+		{pairs: [][2]string{{"{{triple}}", tokens["{{triple}}"]}}},
+		{pairs: [][2]string{{"{{musltriple}}", tokens["{{musltriple}}"]}}},
+		// Prefer {{os}} over {{platform}} — the two are identical except
+		// on darwin (os=darwin, platform=macos), and {{os}} aligns with
+		// the Go naming convention used by most release assets.
+		{pairs: [][2]string{
+			{"{{os}}", tokens["{{os}}"]},
+			{"{{gnuarch}}", tokens["{{gnuarch}}"]},
+		}},
+		{pairs: [][2]string{
+			{"{{os}}", tokens["{{os}}"]},
+			{"{{arch}}", tokens["{{arch}}"]},
+		}},
+		{pairs: [][2]string{
+			{"{{platform}}", tokens["{{platform}}"]},
+			{"{{gnuarch}}", tokens["{{gnuarch}}"]},
+		}},
+		{pairs: [][2]string{
+			{"{{platform}}", tokens["{{platform}}"]},
+			{"{{arch}}", tokens["{{arch}}"]},
+		}},
+	}
+
+	for _, s := range strategies {
+		candidate := name
+		applied := true
+		for _, pair := range s.pairs {
+			tokenName, literal := pair[0], pair[1]
+			if literal == "" || !isDelimitedToken(candidate, literal) {
+				applied = false
+				break
+			}
+			candidate = strings.Replace(candidate, literal, tokenName, 1)
+		}
+		if applied && candidate != name {
+			return candidate
+		}
+	}
+	return name
+}
+
+// isDelimitedToken returns true if literal appears in s as a
+// delimiter-bounded segment (delimiters: start/end of string, '-', '_', '.').
+func isDelimitedToken(s, literal string) bool {
+	idx := strings.Index(s, literal)
+	if idx < 0 {
+		return false
+	}
+	before := idx == 0 || isBinDelim(s[idx-1])
+	after := idx+len(literal) == len(s) || isBinDelim(s[idx+len(literal)])
+	return before && after
+}
+
+func isBinDelim(b byte) bool {
+	return b == '-' || b == '_' || b == '.'
 }
 
 // stripBinaryExt removes a single trailing extension that may appear on a
