@@ -13,9 +13,9 @@ import (
 func TestExtractTarGz(t *testing.T) {
 	// Create a tar.gz with a leading directory
 	src := createTestTarGz(t, "myapp-v1.0/", map[string]string{
-		"myapp-v1.0/myapp":       "binary-content",
-		"myapp-v1.0/README.md":   "readme",
-		"myapp-v1.0/doc/man.1":   "man page",
+		"myapp-v1.0/myapp":     "binary-content",
+		"myapp-v1.0/README.md": "readme",
+		"myapp-v1.0/doc/man.1": "man page",
 	})
 
 	dest := t.TempDir()

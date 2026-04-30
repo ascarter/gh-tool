@@ -60,7 +60,9 @@ type removeReporter struct{}
 func (removeReporter) Start(string)         {}
 func (removeReporter) Stage(string, string) {}
 func (removeReporter) Warn(string, string)  {}
-func (removeReporter) Done(name, _ string)  { fmt.Printf("%s Removed %s\n", ui.Success(ui.IconSuccess), name) }
+func (removeReporter) Done(name, _ string) {
+	fmt.Printf("%s Removed %s\n", ui.Success(ui.IconSuccess), name)
+}
 func (removeReporter) Fail(name string, err error) {
 	fmt.Printf("%s %s: %s\n", ui.Error(ui.IconFailure), name, err)
 }

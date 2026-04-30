@@ -169,22 +169,22 @@ func TestLoadParseError(t *testing.T) {
 
 func TestResolvePattern(t *testing.T) {
 	tests := []struct {
-		name     string
-		tool     Tool
-		goos     string
-		goarch   string
-		want     string
+		name   string
+		tool   Tool
+		goos   string
+		goarch string
+		want   string
 	}{
 		{
-			name:   "no patterns map, uses default",
-			tool:   Tool{Pattern: "tool-{{os}}-{{arch}}.tar.gz"},
-			goos:   "darwin", goarch: "arm64",
+			name: "no patterns map, uses default",
+			tool: Tool{Pattern: "tool-{{os}}-{{arch}}.tar.gz"},
+			goos: "darwin", goarch: "arm64",
 			want: "tool-{{os}}-{{arch}}.tar.gz",
 		},
 		{
 			name: "patterns map hit",
 			tool: Tool{
-				Pattern:  "nvim-{{platform}}-{{arch}}.tar.gz",
+				Pattern: "nvim-{{platform}}-{{arch}}.tar.gz",
 				Patterns: map[string]string{
 					"darwin_amd64": "nvim-macos-x86_64.tar.gz",
 					"linux_amd64":  "nvim-linux-x86_64.tar.gz",
@@ -196,7 +196,7 @@ func TestResolvePattern(t *testing.T) {
 		{
 			name: "patterns map miss, falls back to default",
 			tool: Tool{
-				Pattern:  "nvim-{{platform}}-{{arch}}.tar.gz",
+				Pattern: "nvim-{{platform}}-{{arch}}.tar.gz",
 				Patterns: map[string]string{
 					"darwin_amd64": "nvim-macos-x86_64.tar.gz",
 				},

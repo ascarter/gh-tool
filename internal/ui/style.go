@@ -25,10 +25,10 @@ func IsTTY() bool {
 // Style tokens. Render returns the styled string on a TTY, the plain string
 // otherwise — callers do not need to branch on IsTTY themselves.
 var (
-	styleSuccess = lipgloss.NewStyle().Foreground(lipgloss.Color("2"))  // green
-	styleWarn    = lipgloss.NewStyle().Foreground(lipgloss.Color("3"))  // yellow
-	styleError   = lipgloss.NewStyle().Foreground(lipgloss.Color("1"))  // red
-	styleMuted   = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))  // bright black / gray
+	styleSuccess = lipgloss.NewStyle().Foreground(lipgloss.Color("2")) // green
+	styleWarn    = lipgloss.NewStyle().Foreground(lipgloss.Color("3")) // yellow
+	styleError   = lipgloss.NewStyle().Foreground(lipgloss.Color("1")) // red
+	styleMuted   = lipgloss.NewStyle().Foreground(lipgloss.Color("8")) // bright black / gray
 	styleBold    = lipgloss.NewStyle().Bold(true)
 	styleWarnLbl = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("3"))
 )

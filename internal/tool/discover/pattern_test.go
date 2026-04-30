@@ -53,10 +53,10 @@ func TestFoldOSGnuArch(t *testing.T) {
 func TestFoldOSArch(t *testing.T) {
 	// Simple OS + arch fold (jq-ish).
 	got := Fold("1.7.1", map[PlatformKey]string{
-		"darwin_amd64":  "jq-darwin-amd64",
-		"darwin_arm64":  "jq-darwin-arm64",
-		"linux_amd64":   "jq-linux-amd64",
-		"linux_arm64":   "jq-linux-arm64",
+		"darwin_amd64": "jq-darwin-amd64",
+		"darwin_arm64": "jq-darwin-arm64",
+		"linux_amd64":  "jq-linux-amd64",
+		"linux_arm64":  "jq-linux-arm64",
 	})
 	want := FoldResult{Pattern: "jq-{{os}}-{{arch}}"}
 	if !reflect.DeepEqual(got, want) {
@@ -123,17 +123,17 @@ func TestFoldGnuTriplePreferredOverMusl(t *testing.T) {
 }
 
 func TestFoldTagWithoutVPrefix(t *testing.T) {
-// fzf style: tag is "v0.71.0" but assets use "0.71.0". The folded
-// pattern should use "*" as a wildcard so gh release download still
-// resolves the asset on subsequent versions.
-got := Fold("v0.71.0", map[PlatformKey]string{
-"darwin_amd64": "fzf-0.71.0-darwin_amd64.tar.gz",
-"darwin_arm64": "fzf-0.71.0-darwin_arm64.tar.gz",
-"linux_amd64":  "fzf-0.71.0-linux_amd64.tar.gz",
-"linux_arm64":  "fzf-0.71.0-linux_arm64.tar.gz",
-})
-want := "fzf-*-{{os}}_{{arch}}.tar.gz"
-if got.Pattern != want {
-t.Errorf("Fold pattern = %q, want %q (got=%+v)", got.Pattern, want, got)
-}
+	// fzf style: tag is "v0.71.0" but assets use "0.71.0". The folded
+	// pattern should use "*" as a wildcard so gh release download still
+	// resolves the asset on subsequent versions.
+	got := Fold("v0.71.0", map[PlatformKey]string{
+		"darwin_amd64": "fzf-0.71.0-darwin_amd64.tar.gz",
+		"darwin_arm64": "fzf-0.71.0-darwin_arm64.tar.gz",
+		"linux_amd64":  "fzf-0.71.0-linux_amd64.tar.gz",
+		"linux_arm64":  "fzf-0.71.0-linux_arm64.tar.gz",
+	})
+	want := "fzf-*-{{os}}_{{arch}}.tar.gz"
+	if got.Pattern != want {
+		t.Errorf("Fold pattern = %q, want %q (got=%+v)", got.Pattern, want, got)
+	}
 }

@@ -87,11 +87,11 @@ func TestRunReset_Cleanup(t *testing.T) {
 
 	// Seed files in every wipe target and in the preserved config dir.
 	seed := map[string]string{
-		dirs.ConfigFile():                                    "manifest = true\n",
-		filepath.Join(dirs.Data, "marker"):                   "data",
-		filepath.Join(dirs.State, "foo.toml"):                "stub",
-		filepath.Join(dirs.Cache, "foo", "asset.tar.gz"):     "binary",
-		filepath.Join(dirs.ToolsDir(), "foo", "bin", "foo"):  "binary",
+		dirs.ConfigFile():                                   "manifest = true\n",
+		filepath.Join(dirs.Data, "marker"):                  "data",
+		filepath.Join(dirs.State, "foo.toml"):               "stub",
+		filepath.Join(dirs.Cache, "foo", "asset.tar.gz"):    "binary",
+		filepath.Join(dirs.ToolsDir(), "foo", "bin", "foo"): "binary",
 	}
 	for p, content := range seed {
 		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {

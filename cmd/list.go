@@ -187,4 +187,3 @@ func fetchLatestTags(repos []string, stateByRepo map[string]tool.InstalledState)
 	_, _ = ui.Run(jobs, ui.DefaultJobs())
 	return out
 }
-

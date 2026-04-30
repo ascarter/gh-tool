@@ -82,7 +82,7 @@ func extractTarXz(archivePath, destDir string) error {
 		return err
 	}
 	return extractTar(f, destDir, prefix)
-}// extractTar reads tar entries from r and writes them to destDir, stripping prefix.
+} // extractTar reads tar entries from r and writes them to destDir, stripping prefix.
 func extractTar(r io.Reader, destDir, prefix string) error {
 	tr := tar.NewReader(r)
 	for {
