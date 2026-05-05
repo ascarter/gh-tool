@@ -109,6 +109,26 @@ func candidateTemplates(asset, tag string, key PlatformKey) []string {
 			{"{{os}}", tokens["{{os}}"]},
 			{"{{gnuarch}}", tokens["{{gnuarch}}"]},
 		}},
+		// Platform name + release arch (x86_64 everywhere; aarch64 on macOS arm64, arm64 on Linux arm64).
+		{subs: [][2]string{
+			{"{{platform}}", tokens["{{platform}}"]},
+			{"{{relarch}}", tokens["{{relarch}}"]},
+		}},
+		// OS + release arch.
+		{subs: [][2]string{
+			{"{{os}}", tokens["{{os}}"]},
+			{"{{relarch}}", tokens["{{relarch}}"]},
+		}},
+		// Platform name + short arch (x64 for amd64, arm64 for arm64).
+		{subs: [][2]string{
+			{"{{platform}}", tokens["{{platform}}"]},
+			{"{{shortarch}}", tokens["{{shortarch}}"]},
+		}},
+		// OS + short arch.
+		{subs: [][2]string{
+			{"{{os}}", tokens["{{os}}"]},
+			{"{{shortarch}}", tokens["{{shortarch}}"]},
+		}},
 		// Platform name + Go arch.
 		{subs: [][2]string{
 			{"{{platform}}", tokens["{{platform}}"]},

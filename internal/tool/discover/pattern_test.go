@@ -122,6 +122,34 @@ func TestFoldGnuTriplePreferredOverMusl(t *testing.T) {
 	}
 }
 
+func TestFoldPlatformRelArch(t *testing.T) {
+	// ncspot-style: x86_64 everywhere, aarch64 for macOS arm64, arm64 for Linux arm64.
+	got := Fold("v1.3.3", map[PlatformKey]string{
+		"darwin_amd64": "ncspot-v1.3.3-macos-x86_64.tar.gz",
+		"darwin_arm64": "ncspot-v1.3.3-macos-aarch64.tar.gz",
+		"linux_amd64":  "ncspot-v1.3.3-linux-x86_64.tar.gz",
+		"linux_arm64":  "ncspot-v1.3.3-linux-arm64.tar.gz",
+	})
+	want := FoldResult{Pattern: "ncspot-{{tag}}-{{platform}}-{{relarch}}.tar.gz"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("Fold = %+v, want %+v", got, want)
+	}
+}
+
+func TestFoldOSX64Arch(t *testing.T) {
+	// ghui-style: x64 for amd64, arm64 for arm64, using OS (not platform) name.
+	got := Fold("v0.6.0", map[PlatformKey]string{
+		"darwin_amd64": "ghui-darwin-x64.tar.gz",
+		"darwin_arm64": "ghui-darwin-arm64.tar.gz",
+		"linux_amd64":  "ghui-linux-x64.tar.gz",
+		"linux_arm64":  "ghui-linux-arm64.tar.gz",
+	})
+	want := FoldResult{Pattern: "ghui-{{os}}-{{shortarch}}.tar.gz"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("Fold = %+v, want %+v", got, want)
+	}
+}
+
 func TestFoldTagWithoutVPrefix(t *testing.T) {
 	// fzf style: tag is "v0.71.0" but assets use "0.71.0". The folded
 	// pattern should use "*" as a wildcard so gh release download still

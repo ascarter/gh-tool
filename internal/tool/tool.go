@@ -500,6 +500,8 @@ func Tokens(goos, goarch, tag string) map[string]string {
 		"{{musltriple}}": platformMuslTriple(goos, goarch),
 		"{{platform}}":   platformName(goos),
 		"{{gnuarch}}":    gnuArch(goarch),
+		"{{relarch}}":    releaseArch(goos, goarch),
+		"{{shortarch}}":  shortArch(goarch),
 		"{{tag}}":        tag,
 	}
 }
@@ -523,6 +525,8 @@ func ExpandPatternFor(pattern, tag, goos, goarch string) string {
 //	{{musltriple}} — Rust target triple, Linux uses musl libc
 //	{{platform}}   — User-facing OS name: macos, linux, windows
 //	{{gnuarch}}    — GNU/Rust-style arch: aarch64, x86_64, i686
+//	{{relarch}}    — release arch: x86_64 (amd64), aarch64 (darwin/arm64), arm64 (linux/arm64)
+//	{{shortarch}}  — short arch: x64 (amd64), arm64 (arm64), x86 (386)
 //	{{tag}}        — release tag, e.g. v1.2.3 (empty if not yet resolved)
 func ExpandPattern(pattern, tag string) string {
 	return ExpandPatternFor(pattern, tag, runtime.GOOS, runtime.GOARCH)
@@ -575,6 +579,39 @@ func gnuArch(goarch string) string {
 		return "aarch64"
 	case "386":
 		return "i686"
+	default:
+		return goarch
+	}
+}
+
+// releaseArch returns the arch token as commonly used in release artifacts.
+// Like gnuArch but arm64 on Linux stays "arm64" (not "aarch64"), matching the
+// GitHub Actions / Go toolchain convention many projects use for Linux builds.
+func releaseArch(goos, goarch string) string {
+	switch goarch {
+	case "amd64":
+		return "x86_64"
+	case "arm64":
+		if goos == "darwin" {
+			return "aarch64"
+		}
+		return "arm64"
+	case "386":
+		return "i686"
+	default:
+		return goarch
+	}
+}
+
+// shortArch returns the arch token using the "x64" abbreviation for amd64.
+// Matches the naming convention used by Microsoft, Node.js, and some CI
+// systems: amd64 → "x64", arm64 → "arm64", 386 → "x86".
+func shortArch(goarch string) string {
+	switch goarch {
+	case "amd64":
+		return "x64"
+	case "386":
+		return "x86"
 	default:
 		return goarch
 	}
