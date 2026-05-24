@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -16,32 +17,36 @@ import (
 
 // LiveReporter is a tool.Reporter backed by a Bubble Tea program. It owns
 // stdout while the program runs and renders a multi-row spinner view: each
-// in-flight tool is one row showing its current stage; finished tools are
-// flushed above the live area as a static line so the scrollback stays
-// useful after the run.
+// in-flight tool is one row showing its current stage. When the batch
+// finishes, all result lines (Done/Fail, with any buffered warnings) are
+// printed to the terminal after the spinner view exits.
 //
 // The reporter is designed for parallel install/upgrade batches. It is
-// safe to call from multiple goroutines: every event method dispatches a
-// tea message via program.Send.
+// safe to call from multiple goroutines.
 type LiveReporter struct {
-	prog    *tea.Program
-	out     io.Writer
-	startWg sync.WaitGroup
-	doneCh  chan struct{}
+	prog      *tea.Program
+	out       io.Writer
+	startWg   sync.WaitGroup
+	doneCh    chan struct{}
+	stopOnce  sync.Once
+	mu        sync.Mutex
+	warns     map[string][]string
+	completed []string
 }
 
 // NewLiveReporter constructs (but does not start) a live reporter. Call
-// Start to launch the Bubble Tea program in the background, then Stop when
-// the batch finishes.
+// Launch to start the Bubble Tea program, then Stop when the batch finishes.
 func NewLiveReporter() *LiveReporter {
-	return &LiveReporter{out: os.Stdout, doneCh: make(chan struct{})}
+	return &LiveReporter{
+		out:    os.Stdout,
+		doneCh: make(chan struct{}),
+		warns:  map[string][]string{},
+	}
 }
 
 var _ tool.Reporter = (*LiveReporter)(nil)
 
-// Launch starts the Bubble Tea program in the background. It is named
-// Launch (rather than Start) to avoid colliding with the Start method on
-// the tool.Reporter interface.
+// Launch starts the Bubble Tea program in the background.
 func (r *LiveReporter) Launch() error {
 	m := newLiveModel()
 	r.prog = tea.NewProgram(m, tea.WithOutput(r.out))
@@ -61,15 +66,25 @@ func (r *LiveReporter) Launch() error {
 	return nil
 }
 
-// Stop signals the program to quit and waits for it to flush its final
-// frame to the terminal.
+// Stop signals the program to quit, waits for it to flush its final frame,
+// then prints all accumulated result lines to the terminal. Safe to call
+// multiple times — only the first call does work.
 func (r *LiveReporter) Stop() {
 	if r.prog == nil {
 		return
 	}
-	r.startWg.Wait()
-	r.prog.Send(quitMsg{})
-	<-r.doneCh
+	r.stopOnce.Do(func() {
+		r.startWg.Wait()
+		r.prog.Send(quitMsg{})
+		<-r.doneCh
+		// Print results after the live view has fully exited so they are never
+		// overwritten by the spinner's clear-on-quit erase sequence.
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		for _, line := range r.completed {
+			fmt.Fprintln(r.out, line)
+		}
+	})
 }
 
 func (r *LiveReporter) send(msg tea.Msg) {
@@ -82,22 +97,56 @@ func (r *LiveReporter) send(msg tea.Msg) {
 
 func (r *LiveReporter) Start(name string)      { r.send(startMsg{name: name}) }
 func (r *LiveReporter) Stage(name, msg string) { r.send(stageMsg{name: name, stage: msg}) }
-func (r *LiveReporter) Warn(name, msg string)  { r.send(warnMsg{name: name, msg: msg}) }
-func (r *LiveReporter) Done(name, tag string)  { r.send(doneMsg{name: name, tag: tag}) }
+
+func (r *LiveReporter) Warn(name, msg string) {
+	r.mu.Lock()
+	r.warns[name] = append(r.warns[name], msg)
+	r.mu.Unlock()
+}
+
+func (r *LiveReporter) Done(name, tag string) {
+	r.mu.Lock()
+	warns := r.warns[name]
+	delete(r.warns, name)
+	line := Success(IconSuccess) + " Installed " + name
+	if tag != "" {
+		line += " (" + tag + ")"
+	}
+	r.completed = append(r.completed, prependWarns(warns, name, line))
+	r.mu.Unlock()
+	r.send(doneMsg{name: name})
+}
+
 func (r *LiveReporter) Fail(name string, err error) {
-	r.send(failMsg{name: name, err: err})
+	r.mu.Lock()
+	warns := r.warns[name]
+	delete(r.warns, name)
+	line := Error(IconFailure) + " " + name + ": " + err.Error()
+	r.completed = append(r.completed, prependWarns(warns, name, line))
+	r.mu.Unlock()
+	r.send(failMsg{name: name})
+}
+
+// prependWarns formats any buffered warnings for name and joins them with the
+// terminal result line so the whole block appears as one entry.
+func prependWarns(warns []string, name, terminal string) string {
+	if len(warns) == 0 {
+		return terminal
+	}
+	var b strings.Builder
+	for _, w := range warns {
+		b.WriteString(WarnLabel(IconWarn+" Warning:") + " " + name + ": " + w + "\n")
+	}
+	b.WriteString(terminal)
+	return b.String()
 }
 
 // ----- model + messages ---------------------------------------------------
 
 type startMsg struct{ name string }
 type stageMsg struct{ name, stage string }
-type warnMsg struct{ name, msg string }
-type doneMsg struct{ name, tag string }
-type failMsg struct {
-	name string
-	err  error
-}
+type doneMsg struct{ name string }
+type failMsg struct{ name string }
 type quitMsg struct{}
 type tickMsg time.Time
 
@@ -105,14 +154,11 @@ type tickMsg time.Time
 type row struct {
 	name  string
 	stage string
-	warns []string
 }
 
 type liveModel struct {
 	rows     map[string]*row
 	order    []string // insertion order for stable rendering
-	finished int
-	failed   int
 	tick     int
 	quitting bool
 	width    int
@@ -122,9 +168,6 @@ func newLiveModel() *liveModel {
 	return &liveModel{rows: map[string]*row{}}
 }
 
-// spinnerFrames is a small braille spinner. Bubble Tea's bubbles/spinner
-// component would also work but pulling the full subpackage is overkill
-// for a single animation we tick ourselves.
 var spinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
 
 func (m *liveModel) Init() tea.Cmd {
@@ -153,63 +196,17 @@ func (m *liveModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			r.stage = msg.stage
 		}
 		return m, nil
-	case warnMsg:
-		// Buffer warns so they print together with the tool's terminal
-		// line (Done/Fail) instead of interleaving with other tools'
-		// output. The row is created lazily here in case Warn arrives
-		// before Start (rare but harmless).
-		r, ok := m.rows[msg.name]
-		if !ok {
-			r = &row{name: msg.name}
-			m.rows[msg.name] = r
-			m.order = append(m.order, msg.name)
-		}
-		r.warns = append(r.warns, msg.msg)
-		return m, nil
 	case doneMsg:
-		warns := m.flushWarns(msg.name)
 		m.finishRow(msg.name)
-		line := Success(IconSuccess) + " Installed " + msg.name
-		if msg.tag != "" {
-			line += " (" + msg.tag + ")"
-		}
-		return m, printAbove(joinTool(warns, msg.name, line))
+		return m, nil
 	case failMsg:
-		warns := m.flushWarns(msg.name)
 		m.finishRow(msg.name)
-		m.failed++
-		line := Error(IconFailure) + " " + msg.name + ": " + msg.err.Error()
-		return m, printAbove(joinTool(warns, msg.name, line))
+		return m, nil
 	case quitMsg:
 		m.quitting = true
 		return m, tea.Quit
 	}
 	return m, nil
-}
-
-// flushWarns returns the accumulated warnings for a tool and clears them.
-func (m *liveModel) flushWarns(name string) []string {
-	r, ok := m.rows[name]
-	if !ok {
-		return nil
-	}
-	w := r.warns
-	r.warns = nil
-	return w
-}
-
-// joinTool prefixes a slice of warnings with the styled "⚠ Warning:" label
-// and the tool name, then appends the terminal line so the whole block
-// appears as one chunk in the scrollback.
-func joinTool(warns []string, name, terminal string) string {
-	if len(warns) == 0 {
-		return terminal
-	}
-	out := ""
-	for _, w := range warns {
-		out += WarnLabel(IconWarn+" Warning:") + " " + name + ": " + w + "\n"
-	}
-	return out + terminal
 }
 
 func (m *liveModel) finishRow(name string) {
@@ -223,14 +220,6 @@ func (m *liveModel) finishRow(name string) {
 			break
 		}
 	}
-	m.finished++
-}
-
-// printAbove returns a tea.Cmd that prints a line in the scrollback above
-// the live view, leaving the terminal scrollable and copyable after the
-// run completes.
-func printAbove(line string) tea.Cmd {
-	return tea.Printf("%s", line)
 }
 
 func (m *liveModel) View() string {
@@ -240,8 +229,6 @@ func (m *liveModel) View() string {
 	frame := spinnerFrames[m.tick%len(spinnerFrames)]
 	spin := lipgloss.NewStyle().Foreground(lipgloss.Color("6")).Render(frame)
 
-	// Stable order for rendering — insertion order keeps recently-started
-	// rows where the user expects them.
 	names := make([]string, 0, len(m.order))
 	names = append(names, m.order...)
 	sort.SliceStable(names, func(i, j int) bool { return false })

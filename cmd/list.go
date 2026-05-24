@@ -61,13 +61,13 @@ func runList(cmd *cobra.Command, args []string) error {
 		stateByRepo[s.Repo] = s
 	}
 
-	// Fan out LatestTag in parallel — the only network call in `list`.
 	latestByRepo := fetchLatestTags(repos, stateByRepo)
 
 	type listRow struct {
-		repo, installed, latest string
-		outdated                bool
-		pinned                  bool
+		repo     string
+		version  string // display string: tag, optionally with update arrow
+		outdated bool
+		pinned   bool
 	}
 	rows := make([]listRow, 0, len(states))
 	for _, repo := range repos {
@@ -80,16 +80,21 @@ func runList(cmd *cobra.Command, args []string) error {
 		if m := cfg.FindTool(repo); m != nil && m.Tag != "" && m.Tag != "latest" {
 			pinned = true
 		}
-		installed := s.Tag
+		outdated := latest != "?" && latest != s.Tag
+
+		version := s.Tag
 		if pinned {
-			installed += " (pinned)"
+			version += " (pinned)"
 		}
+		if outdated {
+			version += " " + ui.IconArrow + " " + latest
+		}
+
 		rows = append(rows, listRow{
-			repo:      repo,
-			installed: installed,
-			latest:    latest,
-			outdated:  latest != "?" && latest != s.Tag,
-			pinned:    pinned,
+			repo:     repo,
+			version:  version,
+			outdated: outdated,
+			pinned:   pinned,
 		})
 	}
 
@@ -117,37 +122,39 @@ func runList(cmd *cobra.Command, args []string) error {
 	}
 	tp := tableprinter.New(os.Stdout, terminal.IsTerminalOutput(), w)
 
-	maxRepo := len("REPO")
-	maxInst := len("INSTALLED")
-	maxLatest := len("LATEST")
+	maxTool := len("TOOL")
+	maxVersion := len("VERSION")
 	for _, r := range rows {
-		if l := len(r.repo); l > maxRepo {
-			maxRepo = l
+		if l := len(r.repo); l > maxTool {
+			maxTool = l
 		}
-		if l := len(r.installed); l > maxInst {
-			maxInst = l
-		}
-		if l := len(r.latest); l > maxLatest {
-			maxLatest = l
+		if l := len(r.version); l > maxVersion {
+			maxVersion = l
 		}
 	}
 
-	tp.AddField("REPO")
-	tp.AddField("INSTALLED")
-	tp.AddField("LATEST")
+	// Three physical columns: icon (blank or ↑), TOOL, VERSION.
+	// Keeping the icon in its own column avoids ANSI-width miscalculation.
+	tp.AddField("")
+	tp.AddField("TOOL")
+	tp.AddField("VERSION")
 	tp.EndRow()
-	tp.AddField(strings.Repeat("-", maxRepo))
-	tp.AddField(strings.Repeat("-", maxInst))
-	tp.AddField(strings.Repeat("-", maxLatest))
+	tp.AddField(" ")
+	tp.AddField(strings.Repeat("-", maxTool))
+	tp.AddField(strings.Repeat("-", maxVersion))
 	tp.EndRow()
 
 	for _, r := range rows {
-		tp.AddField(r.repo)
-		tp.AddField(r.installed)
 		if r.outdated {
-			tp.AddField(r.latest, tableprinter.WithColor(ui.Warn))
+			tp.AddField("↑", tableprinter.WithColor(ui.Warn))
 		} else {
-			tp.AddField(r.latest)
+			tp.AddField("")
+		}
+		tp.AddField(r.repo)
+		if r.outdated {
+			tp.AddField(r.version, tableprinter.WithColor(ui.Warn))
+		} else {
+			tp.AddField(r.version)
 		}
 		tp.EndRow()
 	}
