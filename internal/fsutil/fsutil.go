@@ -2,7 +2,6 @@
 package fsutil
 
 import (
-	"fmt"
 	"path/filepath"
 	"strings"
 )
@@ -17,15 +16,4 @@ func WithinDir(target, dir string) bool {
 		return true
 	}
 	return strings.HasPrefix(target, dir+string(filepath.Separator))
-}
-
-// SafeJoin joins name onto dir and verifies the cleaned result stays within
-// dir. It returns an error for inputs that would escape dir via "..", absolute
-// paths, or sibling-prefix tricks (path traversal / zip-slip).
-func SafeJoin(dir, name string) (string, error) {
-	target := filepath.Join(dir, filepath.FromSlash(name))
-	if !WithinDir(target, dir) {
-		return "", fmt.Errorf("path %q escapes %q", name, dir)
-	}
-	return target, nil
 }

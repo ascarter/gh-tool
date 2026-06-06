@@ -186,8 +186,13 @@ func extractTar(r io.Reader, destDir, prefix string, g *limitGuard) error {
 			return err
 		}
 
-		target, err := fsutil.SafeJoin(destDir, name)
-		if err != nil {
+		// Reject entries that escape destDir (Zip-Slip / path traversal).
+		// The strings.HasPrefix check against the cleaned destination is the
+		// canonical guard and is kept inline so it directly dominates the
+		// file operations below.
+		cleanDest := filepath.Clean(destDir)
+		target := filepath.Join(cleanDest, filepath.FromSlash(name))
+		if target != cleanDest && !strings.HasPrefix(target, cleanDest+string(os.PathSeparator)) {
 			return fmt.Errorf("tar entry escapes destination: %s", hdr.Name)
 		}
 
@@ -295,8 +300,13 @@ func extractZip(archivePath, destDir string, g *limitGuard) error {
 			return err
 		}
 
-		target, err := fsutil.SafeJoin(destDir, name)
-		if err != nil {
+		// Reject entries that escape destDir (Zip-Slip / path traversal).
+		// The strings.HasPrefix check against the cleaned destination is the
+		// canonical guard and is kept inline so it directly dominates the
+		// file operations below.
+		cleanDest := filepath.Clean(destDir)
+		target := filepath.Join(cleanDest, filepath.FromSlash(name))
+		if target != cleanDest && !strings.HasPrefix(target, cleanDest+string(os.PathSeparator)) {
 			return fmt.Errorf("zip entry escapes destination: %s", f.Name)
 		}
 
