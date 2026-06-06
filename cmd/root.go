@@ -62,9 +62,6 @@ func Execute() error {
 
 func init() {
 	rootCmd.AddCommand(versionCmd)
-	rootCmd.AddCommand(installCmd)
-	rootCmd.AddCommand(removeCmd)
-	rootCmd.AddCommand(listCmd)
 }
 
 var versionCmd = &cobra.Command{

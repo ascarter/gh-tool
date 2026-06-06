@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -231,7 +230,6 @@ func (m *liveModel) View() string {
 
 	names := make([]string, 0, len(m.order))
 	names = append(names, m.order...)
-	sort.SliceStable(names, func(i, j int) bool { return false })
 
 	var lines []string
 	for _, n := range names {

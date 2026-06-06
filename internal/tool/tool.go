@@ -2,6 +2,7 @@ package tool
 
 import (
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -14,8 +15,15 @@ import (
 
 	"github.com/ascarter/gh-tool/internal/archive"
 	"github.com/ascarter/gh-tool/internal/config"
+	"github.com/ascarter/gh-tool/internal/fsutil"
 	"github.com/ascarter/gh-tool/internal/paths"
 )
+
+// ghExec is the seam through which this package shells out to the `gh` CLI.
+// It defaults to go-gh's Exec and is overridable in tests so the download,
+// latest-tag, and attestation-verification paths can be exercised without a
+// real gh binary or network access.
+var ghExec = gh.Exec
 
 // InstalledState records the per-machine install of a tool. It is the
 // authoritative inventory entry used by list, remove, and upgrade. Only
@@ -48,6 +56,13 @@ func (s InstalledState) AsTool() config.Tool {
 type Manager struct {
 	Dirs     paths.Dirs
 	reporter Reporter
+
+	// RequireAttestation makes a genuine attestation verification failure
+	// (an attestation exists but does not verify) abort the install. The
+	// common case of a repo publishing no attestation at all still only
+	// warns, so the default experience is unchanged for the many tools that
+	// don't ship attestations.
+	RequireAttestation bool
 }
 
 // NewManager creates a Manager with resolved XDG paths and a no-op reporter.
@@ -133,7 +148,7 @@ func (m *Manager) DownloadAsset(t config.Tool) (assetPath, tag, resolvedPattern 
 	args := []string{"release", "download", tag, "-R", t.Repo, "-D", cacheDir, "-p", resolvedPattern, "--clobber"}
 
 	m.reporter.Stage(name, fmt.Sprintf("Downloading %s %s", t.Repo, tag))
-	if _, stderr, err := gh.Exec(args...); err != nil {
+	if _, stderr, err := ghExec(args...); err != nil {
 		if msg := strings.TrimSpace(stderr.String()); msg != "" {
 			return "", "", "", fmt.Errorf("downloading release: %w: %s", err, msg)
 		}
@@ -161,7 +176,12 @@ func (m *Manager) installFromAsset(t config.Tool, assetPath, tag, resolvedPatter
 	name := t.Name()
 
 	if verify {
-		m.verifyAttestation(name, t.Repo, assetPath)
+		if err := m.verifyAttestation(name, t.Repo, assetPath); err != nil {
+			if m.RequireAttestation {
+				return err
+			}
+			m.reporter.Warn(name, err.Error())
+		}
 	}
 
 	// Reap any prior install's symlinks before wiping the tool dir. The
@@ -405,13 +425,7 @@ func (m *Manager) removeToolSymlinks(name string) {
 
 // pathWithin reports whether child is equal to or nested inside parent.
 func pathWithin(child, parent string) bool {
-	parent = filepath.Clean(parent)
-	child = filepath.Clean(child)
-	if child == parent {
-		return true
-	}
-	sep := string(filepath.Separator)
-	return strings.HasPrefix(child, parent+sep)
+	return fsutil.WithinDir(child, parent)
 }
 
 func (m *Manager) writeState(name string, state InstalledState) error {
@@ -428,7 +442,7 @@ func (m *Manager) writeState(name string, state InstalledState) error {
 }
 
 func resolveLatestTag(repo string) (string, error) {
-	stdout, _, err := gh.Exec("release", "view", "-R", repo, "--json", "tagName", "--jq", ".tagName")
+	stdout, _, err := ghExec("release", "view", "-R", repo, "--json", "tagName", "--jq", ".tagName")
 	if err != nil {
 		return "", err
 	}
@@ -436,6 +450,10 @@ func resolveLatestTag(repo string) (string, error) {
 }
 
 // findDownloadedAsset finds the first non-checksum file in a cache dir.
+// This assumes a single downloadable asset is present, which holds because
+// DownloadAsset clears the cache dir before each download and passes a single
+// `-p` pattern to `gh release download`. Checksum/signature sidecar files
+// (*.sig, *.asc, and names containing "checksum"/"sha256") are skipped.
 func findDownloadedAsset(dir string) (string, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -468,8 +486,8 @@ func findFileInDir(root, name string) string {
 	// Search by basename
 	base := filepath.Base(name)
 	var found string
-	_ = filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
-		if err != nil || info.IsDir() {
+	_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
 			return nil
 		}
 		if filepath.Base(path) == base {
@@ -486,15 +504,63 @@ func forceSymlink(src, dst string) error {
 	return os.Symlink(src, dst)
 }
 
-// verifyAttestation attempts to verify a downloaded asset using gh attestation verify.
-// This is best-effort: it surfaces a warning via the reporter if verification
-// fails but does not return an error. On success the next stage (Extracting)
-// is the user's signal that verification passed.
-func (m *Manager) verifyAttestation(name, repo, assetPath string) {
+// verifyAttestation verifies a downloaded asset using `gh attestation verify`.
+// It distinguishes two outcomes that the previous best-effort implementation
+// conflated:
+//
+//   - The repo publishes no attestation (the overwhelmingly common case for
+//     third-party CLIs). Treated as a soft signal: a warning is surfaced and
+//     nil is returned so the install proceeds.
+//   - An attestation exists but does not verify (a tampered or mismatched
+//     asset). This returns a non-nil error. installFromAsset aborts when
+//     Manager.RequireAttestation is set; otherwise it surfaces the failure as
+//     a prominent warning.
+//
+// On success the next stage (Extracting) is the user's signal that
+// verification passed.
+func (m *Manager) verifyAttestation(name, repo, assetPath string) error {
 	m.reporter.Stage(name, fmt.Sprintf("Verifying attestation for %s", filepath.Base(assetPath)))
-	if _, _, err := gh.Exec("attestation", "verify", assetPath, "-R", repo); err != nil {
-		m.reporter.Stage(name, "attestation not verified (this is expected for most repos)")
+	_, stderr, err := ghExec("attestation", "verify", assetPath, "-R", repo)
+	if err == nil {
+		return nil
 	}
+	if attestationAbsent(stderr.String()) {
+		m.reporter.Stage(name, "no attestation published (expected for most repos)")
+		return nil
+	}
+	msg := firstLine(stderr.String())
+	if msg == "" {
+		msg = err.Error()
+	}
+	return fmt.Errorf("attestation verification failed for %s: %s", repo, msg)
+}
+
+// attestationAbsent reports whether gh's stderr indicates the repo simply has
+// no attestation to verify (as opposed to an attestation that failed to
+// verify). Matching is best-effort against gh's wording.
+func attestationAbsent(stderr string) bool {
+	low := strings.ToLower(stderr)
+	for _, marker := range []string{
+		"no attestation",
+		"no attestations",
+		"failed to fetch attestations",
+		"no matching attestations",
+	} {
+		if strings.Contains(low, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+// firstLine returns the first non-empty trimmed line of s.
+func firstLine(s string) string {
+	for _, line := range strings.Split(s, "\n") {
+		if t := strings.TrimSpace(line); t != "" {
+			return t
+		}
+	}
+	return ""
 }
 
 // Tokens returns the literal expansions of every supported template token

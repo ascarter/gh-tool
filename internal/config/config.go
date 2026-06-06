@@ -11,15 +11,7 @@ import (
 
 // Config is the top-level TOML manifest structure.
 type Config struct {
-	Settings Settings `toml:"settings,omitempty"`
-	Tools    []Tool   `toml:"tool"`
-}
-
-// Settings holds optional path overrides and global configuration.
-type Settings struct {
-	DataHome  string `toml:"data_home,omitempty"`
-	StateHome string `toml:"state_home,omitempty"`
-	CacheHome string `toml:"cache_home,omitempty"`
+	Tools []Tool `toml:"tool"`
 }
 
 // Tool describes a single tool to install from a GitHub release.

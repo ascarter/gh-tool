@@ -16,25 +16,26 @@ gh tool version                 Print version
 ## Notable flags
 
 - **`add`**: `--file/-f`, `--tag/-t`, `--no-write` (preview the generated block without saving).
-- **`install`**: `--pattern/-p`, `--tag/-t`, `--bin`, `--man`, `--completion`, `--no-verify`, `--force`, `--file/-f`, `--jobs/-j`, `--no-progress`, `--verbose/-v`.
+- **`install`**: `--pattern/-p`, `--tag/-t`, `--bin`, `--man`, `--completion`, `--no-verify`, `--require-attestation`, `--force`, `--file/-f`, `--jobs/-j`, `--no-progress`, `--verbose/-v`.
 - **`list`**: `--outdated`, `--pinned`.
-- **`upgrade`**: `--jobs/-j`, `--no-progress`, `--verbose/-v`.
+- **`upgrade`**: `--jobs/-j`, `--no-progress`, `--verbose/-v`, `--no-verify`, `--require-attestation`.
 - **`reset`**: `--yes/-y`.
 - **`shell`**: `--no-completions`.
 
 ## Common flag semantics
 
-| Flag               | Purpose                                                        |
-|--------------------|----------------------------------------------------------------|
-| `-j, --jobs N`     | Parallelism cap (default `min(8, NumCPU)`).                    |
-| `--no-progress`    | Disable the live progress UI; print one line per event.        |
-| `-v, --verbose`    | Log every step (download, verify, extract) per tool.           |
-| `--no-verify`      | Skip attestation verification (install only).                  |
+| Flag                     | Purpose                                                        |
+|--------------------------|----------------------------------------------------------------|
+| `-j, --jobs N`           | Parallelism cap (default `min(8, NumCPU)`).                    |
+| `--no-progress`          | Disable the live progress UI; print one line per event.        |
+| `-v, --verbose`          | Log every step (download, verify, extract) per tool.           |
+| `--no-verify`            | Skip attestation verification (install and upgrade).           |
+| `--require-attestation`  | Fail the install/upgrade if an attestation exists but does not verify. Repos that publish no attestation still proceed (install and upgrade). |
 
 ## How install works
 
 1. `gh tool install` downloads a release asset via `gh release download` into a cache directory.
-2. The asset is verified with `gh attestation verify` (best-effort — most repos don't publish attestations yet).
+2. The asset is verified with `gh attestation verify` (best-effort — most repos don't publish attestations yet). A repo that publishes no attestation only warns and continues; pass `--require-attestation` to make a genuine verification *failure* (an attestation exists but does not match) abort.
 3. Archives (`tar.gz`, `tar.xz`, `zip`) are extracted; bare binaries are copied directly. If an archive has a single top-level directory, it is stripped automatically.
 4. Symlinks are created from the bin directory into the extracted tool directory. Use `source:link` in `bin` to rename binaries (e.g., `jq-macos-arm64:jq`).
 5. A state file under the state directory records the installed tag, the resolved download pattern, and the symlinked `bin`/`man`/`completions`. `list`, `remove`, and `upgrade` operate from these state files; the manifest is only consulted by `install` (and by `list` for drift reporting).

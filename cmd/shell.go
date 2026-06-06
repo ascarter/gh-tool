@@ -105,15 +105,15 @@ export MANPATH="%s:$MANPATH"
 			fmt.Printf(`
 # zsh completions (interactive shells only)
 if [[ -o interactive ]]; then
-  fpath=(%s $fpath)
+  fpath=("%s" $fpath)
 fi
 `, dirs.ZshCompletionDir())
 		}
 
 	case "fish":
 		fmt.Printf(`# gh-tool shell integration (fish)
-fish_add_path -g %s
-set -gx MANPATH %s $MANPATH
+fish_add_path -g "%s"
+set -gx MANPATH "%s" $MANPATH
 `, dirs.BinDir(), dirs.ManDir())
 		if opts.GhtoolHome != "" {
 			fmt.Printf("set -gx GHTOOL_HOME %q\n", opts.GhtoolHome)
@@ -121,8 +121,8 @@ set -gx MANPATH %s $MANPATH
 		if !opts.NoCompletions {
 			fmt.Printf(`
 # fish completions (interactive shells only)
-if status is-interactive; and test -d %s
-    for f in %s/*.fish
+if status is-interactive; and test -d "%s"
+    for f in "%s"/*.fish
         source $f
     end
 end

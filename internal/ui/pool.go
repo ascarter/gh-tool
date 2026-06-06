@@ -2,6 +2,7 @@ package ui
 
 import (
 	"runtime"
+	"strconv"
 	"sync"
 )
 
@@ -113,20 +114,5 @@ func (e *BatchError) Error() string {
 	if e.Failed == 1 {
 		return "1 job failed"
 	}
-	return pluralCount(e.Failed) + " of " + pluralCount(e.Total) + " jobs failed"
-}
-
-// pluralCount renders an integer with a trailing word. We keep it tiny;
-// fmt would pull no extra dependencies but a hand-rolled itoa stays
-// allocation-light and explicit.
-func pluralCount(n int) string {
-	if n == 0 {
-		return "0"
-	}
-	digits := []byte{}
-	for n > 0 {
-		digits = append([]byte{byte('0' + n%10)}, digits...)
-		n /= 10
-	}
-	return string(digits)
+	return strconv.Itoa(e.Failed) + " of " + strconv.Itoa(e.Total) + " jobs failed"
 }
