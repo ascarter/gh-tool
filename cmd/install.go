@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"runtime"
+	"sort"
 
 	"github.com/spf13/cobra"
 
@@ -190,8 +191,12 @@ func runInstallReconcile(mgr *tool.Manager, cfg *config.Config) error {
 	return nil
 }
 
-// isUpToDate checks whether a tool is already installed at the target version.
-// Returns true (and prints a warning) if the installed version matches, false otherwise.
+// isUpToDate reports whether the installed copy already matches the
+// target version AND the manifest's asset spec. The spec check covers
+// the case where the user added or renamed a bin/man/completion entry
+// after the tool was already installed at the current release tag —
+// without it, `gh tool install` would print "up to date" and never
+// create the new symlinks.
 func isUpToDate(mgr *tool.Manager, t config.Tool) bool {
 	name := t.Name()
 	state := mgr.ReadState(name)
@@ -208,10 +213,38 @@ func isUpToDate(mgr *tool.Manager, t config.Tool) bool {
 		targetTag = latest
 	}
 
-	if state.Tag == targetTag {
-		fmt.Printf("%s %s up to date (%s)\n", ui.IconBullet, name, targetTag)
-		return true
+	if state.Tag != targetTag {
+		return false
+	}
+	if !stringSlicesEqual(state.Bin, t.Bin) ||
+		!stringSlicesEqual(state.Man, t.Man) ||
+		!stringSlicesEqual(state.Completions, t.Completions) {
+		return false
 	}
 
-	return false
+	fmt.Printf("%s %s up to date (%s)\n", ui.IconBullet, name, targetTag)
+	return true
+}
+
+// stringSlicesEqual compares two slices as unordered sets, treating
+// nil and empty as equivalent. Used by isUpToDate to detect manifest
+// asset-spec changes that require a reinstall regardless of whether
+// the release tag moved.
+func stringSlicesEqual(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	if len(a) == 0 {
+		return true
+	}
+	ac := append([]string(nil), a...)
+	bc := append([]string(nil), b...)
+	sort.Strings(ac)
+	sort.Strings(bc)
+	for i := range ac {
+		if ac[i] != bc[i] {
+			return false
+		}
+	}
+	return true
 }

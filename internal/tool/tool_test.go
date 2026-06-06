@@ -289,6 +289,64 @@ func TestRemoveToolSymlinksRelativeTarget(t *testing.T) {
 	}
 }
 
+// Regression: installFromAsset must reap the tool's existing symlinks
+// before re-extracting, otherwise links from a previous install whose
+// bin/man/completion spec changed (rename or removal) dangle pointing
+// into the now-deleted ToolDir.
+func TestInstallFromAssetReapsStaleSymlinks(t *testing.T) {
+	root := t.TempDir()
+	dirs := paths.Dirs{
+		Config: filepath.Join(root, "config"),
+		Data:   filepath.Join(root, "data"),
+		State:  filepath.Join(root, "state"),
+		Cache:  filepath.Join(root, "cache"),
+	}
+	if err := dirs.EnsureDirs(); err != nil {
+		t.Fatalf("EnsureDirs: %v", err)
+	}
+	mgr := NewManager(dirs)
+
+	name := "mytool"
+	toolDir := dirs.ToolDir(name)
+	if err := os.MkdirAll(toolDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Simulate a prior install: a symlink in BinDir pointing at a file
+	// inside the (about-to-be-replaced) ToolDir. The new install's
+	// manifest will not reference this file.
+	staleSrc := filepath.Join(toolDir, "old-name")
+	if err := os.WriteFile(staleSrc, []byte{}, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	staleLink := filepath.Join(dirs.BinDir(), "old-name")
+	if err := os.Symlink(staleSrc, staleLink); err != nil {
+		t.Fatalf("symlink: %v", err)
+	}
+
+	// Stage a fake "downloaded asset" — a bare binary at a known path —
+	// and use InstallFromAsset (the public wrapper) with a Tool whose
+	// only bin is the new name.
+	asset := filepath.Join(root, "new-name")
+	if err := os.WriteFile(asset, []byte{}, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	tool := config.Tool{Repo: "ex/mytool", Pattern: "new-name", Bin: []string{"new-name"}}
+	if err := mgr.InstallFromAsset(tool, asset, "v1", false); err != nil {
+		t.Fatalf("InstallFromAsset: %v", err)
+	}
+
+	// The stale link must be gone (the bug was that it dangled).
+	if _, err := os.Lstat(staleLink); !os.IsNotExist(err) {
+		t.Errorf("expected stale symlink %s to be removed by reinstall; err=%v", staleLink, err)
+	}
+	// The new link must exist and resolve to the new binary in ToolDir.
+	newLink := filepath.Join(dirs.BinDir(), "new-name")
+	if _, err := os.Lstat(newLink); err != nil {
+		t.Errorf("new bin symlink missing: %v", err)
+	}
+}
+
 func TestInstalledStateRoundTrip(t *testing.T) {
 	root := t.TempDir()
 	dirs := paths.Dirs{

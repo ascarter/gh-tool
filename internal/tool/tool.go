@@ -164,7 +164,15 @@ func (m *Manager) installFromAsset(t config.Tool, assetPath, tag, resolvedPatter
 		m.verifyAttestation(name, t.Repo, assetPath)
 	}
 
-	// Clean previous install
+	// Reap any prior install's symlinks before wiping the tool dir. The
+	// new install's createSymlinks below will only place links the
+	// current manifest entry calls for, so without this reap a renamed
+	// or removed bin/man/completion entry would leave a dangling
+	// symlink behind. Safe to call when there is no prior install:
+	// removeToolSymlinks only removes links whose targets resolve into
+	// the tool's ToolDir.
+	m.removeToolSymlinks(name)
+
 	toolDir := m.Dirs.ToolDir(name)
 	_ = os.RemoveAll(toolDir)
 
