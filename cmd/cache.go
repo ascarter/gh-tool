@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -9,6 +10,8 @@ import (
 	"github.com/cli/go-gh/v2/pkg/tableprinter"
 	"github.com/cli/go-gh/v2/pkg/term"
 	"github.com/spf13/cobra"
+
+	"github.com/ascarter/gh-tool/internal/ui"
 )
 
 var cacheCmd = &cobra.Command{
@@ -137,20 +140,24 @@ func runCacheClean(cmd *cobra.Command, args []string) error {
 		if err := os.RemoveAll(cacheDir); err != nil {
 			return err
 		}
-		fmt.Printf("✓ Cleaned cache for %s\n", args[0])
+		fmt.Printf("%s Cleaned cache for %s\n", ui.Success(ui.IconSuccess), args[0])
 		return nil
 	}
 
 	if err := os.RemoveAll(dirs.Cache); err != nil {
 		return err
 	}
-	fmt.Println("✓ Cleaned all cached downloads")
+	fmt.Printf("%s Cleaned all cached downloads\n", ui.Success(ui.IconSuccess))
 	return nil
 }
 
 func dirStats(dir string) (totalSize int64, fileCount int) {
-	_ = filepath.Walk(dir, func(_ string, info os.FileInfo, err error) error {
-		if err != nil || info.IsDir() {
+	_ = filepath.WalkDir(dir, func(_ string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return nil
+		}
+		info, err := d.Info()
+		if err != nil {
 			return nil
 		}
 		totalSize += info.Size()

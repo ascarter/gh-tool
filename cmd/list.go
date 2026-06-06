@@ -31,6 +31,7 @@ var listCmd = &cobra.Command{
 func init() {
 	listCmd.Flags().BoolVar(&flagListOutdated, "outdated", false, "show only tools with a newer release available")
 	listCmd.Flags().BoolVar(&flagListPinned, "pinned", false, "show only tools pinned to a specific tag")
+	rootCmd.AddCommand(listCmd)
 }
 
 func runList(cmd *cobra.Command, args []string) error {

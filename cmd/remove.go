@@ -19,6 +19,10 @@ var removeCmd = &cobra.Command{
 	RunE:    runRemove,
 }
 
+func init() {
+	rootCmd.AddCommand(removeCmd)
+}
+
 func runRemove(cmd *cobra.Command, args []string) error {
 	repo := args[0]
 	dirs := resolveDirs()

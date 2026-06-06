@@ -2,6 +2,7 @@ package discover
 
 import (
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -74,11 +75,15 @@ var manPageRE = regexp.MustCompile(`\.[1-9]([a-z]?)$`)
 // and completions.
 func scanLayout(root string) (*Layout, error) {
 	layout := &Layout{MachOArchs: map[string]bool{}}
-	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
-		if info.IsDir() {
+		if d.IsDir() {
+			return nil
+		}
+		info, err := d.Info()
+		if err != nil {
 			return nil
 		}
 		rel, _ := filepath.Rel(root, path)

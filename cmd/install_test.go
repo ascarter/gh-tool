@@ -34,10 +34,10 @@ func TestStringSlicesEqual(t *testing.T) {
 
 // Regression: when a tool is already installed at the manifest's target
 // tag but the manifest's bin/man/completions spec has changed (entries
-// added or removed), isUpToDate must return false so install runs and
+// added or removed), upToDate must return false so install runs and
 // actualizes the new spec. The previous implementation only compared
 // the tag and would report "up to date" forever.
-func TestIsUpToDateDetectsManifestSpecChange(t *testing.T) {
+func TestUpToDateDetectsManifestSpecChange(t *testing.T) {
 	root := t.TempDir()
 	dirs := paths.Dirs{
 		Config: filepath.Join(root, "config"),
@@ -62,31 +62,39 @@ func TestIsUpToDateDetectsManifestSpecChange(t *testing.T) {
 	if err := writeStateForTest(dirs, "fzf", state); err != nil {
 		t.Fatalf("write state: %v", err)
 	}
+	got := mgr.ReadState("fzf")
+	if got == nil {
+		t.Fatalf("ReadState returned nil")
+	}
 
 	// Same tag, bin spec unchanged → up to date.
 	tmatch := config.Tool{Repo: "junegunn/fzf", Tag: "v1", Bin: []string{"fzf"}}
-	if !isUpToDate(mgr, tmatch) {
-		t.Errorf("isUpToDate(matching spec)=false, want true")
+	if !upToDate(got, tmatch, "v1") {
+		t.Errorf("upToDate(matching spec)=false, want true")
 	}
 
 	// Same tag, manifest gained completions entry → must NOT be up to
 	// date so install runs and creates the new completion symlinks.
 	tadded := config.Tool{Repo: "junegunn/fzf", Tag: "v1", Bin: []string{"fzf"}, Completions: []string{"shell/completion.bash"}}
-	if isUpToDate(mgr, tadded) {
-		t.Errorf("isUpToDate(spec gained completions)=true, want false")
+	if upToDate(got, tadded, "v1") {
+		t.Errorf("upToDate(spec gained completions)=true, want false")
 	}
 
 	// Same tag, bin renamed → must NOT be up to date.
 	trenamed := config.Tool{Repo: "junegunn/fzf", Tag: "v1", Bin: []string{"fzf-bin:fzf"}}
-	if isUpToDate(mgr, trenamed) {
-		t.Errorf("isUpToDate(renamed bin)=true, want false")
+	if upToDate(got, trenamed, "v1") {
+		t.Errorf("upToDate(renamed bin)=true, want false")
 	}
 
-	// Different tag → false regardless of spec. We pin Tag to bypass
-	// the LatestTag network call.
-	tnewtag := config.Tool{Repo: "junegunn/fzf", Tag: "v2", Bin: []string{"fzf"}}
-	if isUpToDate(mgr, tnewtag) {
-		t.Errorf("isUpToDate(different tag)=true, want false")
+	// Different target tag → false regardless of spec.
+	tmatch2 := config.Tool{Repo: "junegunn/fzf", Tag: "v1", Bin: []string{"fzf"}}
+	if upToDate(got, tmatch2, "v2") {
+		t.Errorf("upToDate(different tag)=true, want false")
+	}
+
+	// Nil state → false.
+	if upToDate(nil, tmatch, "v1") {
+		t.Errorf("upToDate(nil state)=true, want false")
 	}
 }
 
@@ -104,4 +112,3 @@ func writeStateForTest(dirs paths.Dirs, name string, state tool.InstalledState) 
 	defer f.Close()
 	return toml.NewEncoder(f).Encode(state)
 }
-

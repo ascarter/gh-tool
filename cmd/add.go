@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -45,10 +46,12 @@ func init() {
 
 func runAdd(cmd *cobra.Command, args []string) error {
 	if !term.IsTerminal(int(os.Stdin.Fd())) || !term.IsTerminal(int(os.Stdout.Fd())) {
-		return fmt.Errorf(`gh tool add requires an interactive terminal.
+		fmt.Fprintf(os.Stderr, `gh tool add requires an interactive terminal.
 For non-interactive use, run:
   gh tool install %s --pattern '...' --bin '...'
-or edit your manifest directly.`, args[0])
+or edit your manifest directly.
+`, args[0])
+		return errors.New("interactive terminal required")
 	}
 
 	repo := args[0]
@@ -70,7 +73,7 @@ or edit your manifest directly.`, args[0])
 	if err != nil {
 		return err
 	}
-	fmt.Printf("✓ %s @ %s — %d classified assets, %d skipped\n", rel.Repo, rel.Tag, len(rel.All), len(rel.Skipped))
+	fmt.Printf("%s %s @ %s — %d classified assets, %d skipped\n", ui.Success(ui.IconSuccess), rel.Repo, rel.Tag, len(rel.All), len(rel.Skipped))
 
 	platforms := rel.Platforms()
 	if len(platforms) == 0 {
@@ -183,9 +186,9 @@ or edit your manifest directly.`, args[0])
 		return fmt.Errorf("saving manifest: %w", err)
 	}
 	if existing {
-		fmt.Printf("✓ Updated %s in %s\n", repo, mfPath)
+		fmt.Printf("%s Updated %s in %s\n", ui.Success(ui.IconSuccess), repo, mfPath)
 	} else {
-		fmt.Printf("✓ Saved %s to %s\n", repo, mfPath)
+		fmt.Printf("%s Saved %s to %s\n", ui.Success(ui.IconSuccess), repo, mfPath)
 	}
 
 	if !flagAddInstall {
@@ -229,7 +232,7 @@ func refineDarwinArchs(chosen map[discover.PlatformKey]string, inspectAssetName 
 
 func chooseAddPlatforms(platforms []discover.PlatformKey) ([]discover.PlatformKey, error) {
 	if len(platforms) == 1 {
-		fmt.Printf("· Only one platform detected: %s\n", platforms[0])
+		fmt.Printf("%s Only one platform detected: %s\n", ui.IconBullet, platforms[0])
 		return platforms, nil
 	}
 	options := make([]string, len(platforms))
@@ -425,7 +428,7 @@ func chooseAddBins(layout *discover.Layout, repo, inspectAssetName, foldedPatter
 
 	var picked []string
 	if match := layout.MatchBinName(name); match != "" && len(layout.Executables) == 1 {
-		fmt.Printf("· Auto-detected bin: %s\n", match)
+		fmt.Printf("%s Auto-detected bin: %s\n", ui.IconBullet, match)
 		picked = []string{match}
 	} else {
 		options := make([]string, len(layout.Executables))
@@ -433,9 +436,7 @@ func chooseAddBins(layout *discover.Layout, repo, inspectAssetName, foldedPatter
 		// releases (uv: uv+uvx, git: many) almost always want all of
 		// them, and a single-executable case where the name doesn't
 		// match the repo (handled below) still wants the binary.
-		for i, e := range layout.Executables {
-			options[i] = e
-		}
+		copy(options, layout.Executables)
 		if err := promptMultiSelect("Select binaries to symlink:", options, options, &picked); err != nil {
 			return nil, err
 		}

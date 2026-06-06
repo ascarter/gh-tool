@@ -17,6 +17,8 @@ var (
 	flagUpgradeJobs       int
 	flagUpgradeNoProgress bool
 	flagUpgradeVerbose    bool
+	flagUpgradeNoVerify   bool
+	flagUpgradeRequireAtt bool
 )
 
 var upgradeCmd = &cobra.Command{
@@ -29,12 +31,15 @@ func init() {
 	upgradeCmd.Flags().IntVarP(&flagUpgradeJobs, "jobs", "j", 0, "parallel upgrades (default: min(8, NumCPU))")
 	upgradeCmd.Flags().BoolVar(&flagUpgradeNoProgress, "no-progress", false, "disable the live progress UI")
 	upgradeCmd.Flags().BoolVarP(&flagUpgradeVerbose, "verbose", "v", false, "log every step (download, verify, extract)")
+	upgradeCmd.Flags().BoolVar(&flagUpgradeNoVerify, "no-verify", false, "skip attestation verification")
+	upgradeCmd.Flags().BoolVar(&flagUpgradeRequireAtt, "require-attestation", false, "fail if an attestation exists but does not verify")
 	rootCmd.AddCommand(upgradeCmd)
 }
 
 func runUpgrade(cmd *cobra.Command, args []string) error {
 	dirs := resolveDirs()
 	mgr := tool.NewManager(dirs)
+	mgr.RequireAttestation = flagUpgradeRequireAtt
 
 	var states []tool.InstalledState
 	all, err := mgr.ListInstalled()
@@ -160,13 +165,15 @@ func runUpgrade(cmd *cobra.Command, args []string) error {
 	}
 
 	jobs := make([]ui.Job, 0, len(candidates))
+	verify := !flagUpgradeNoVerify
 	for _, c := range candidates {
 		t := c.t
-		// Force tag to latest by clearing it.
-		t.Tag = ""
+		// Thread the tag resolved during the check phase so Install does
+		// not resolve the latest tag a second time.
+		t.Tag = c.latest
 		jobs = append(jobs, ui.Job{
 			Name: t.Name(),
-			Run:  func() error { return mgr.Install(t, true) },
+			Run:  func() error { return mgr.Install(t, verify) },
 		})
 	}
 

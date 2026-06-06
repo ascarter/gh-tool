@@ -1,10 +1,13 @@
 package tool
 
 import (
+	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/ascarter/gh-tool/internal/config"
@@ -597,5 +600,104 @@ func TestFindDownloadedAsset(t *testing.T) {
 	}
 	if _, err := findDownloadedAsset(skipOnly); err == nil {
 		t.Errorf("expected error when only skippable files present")
+	}
+}
+
+func TestAttestationAbsent(t *testing.T) {
+	absent := []string{
+		"no attestations found for subject",
+		"failed to fetch attestations from owner/repo",
+		"X No matching attestations found",
+	}
+	for _, s := range absent {
+		if !attestationAbsent(s) {
+			t.Errorf("attestationAbsent(%q) = false, want true", s)
+		}
+	}
+	present := []string{
+		"verification failed: signature mismatch",
+		"the attestation could not be verified",
+		"",
+	}
+	for _, s := range present {
+		if attestationAbsent(s) {
+			t.Errorf("attestationAbsent(%q) = true, want false", s)
+		}
+	}
+}
+
+func TestFirstLine(t *testing.T) {
+	if got := firstLine("\n\n  hello \nworld"); got != "hello" {
+		t.Errorf("firstLine = %q, want %q", got, "hello")
+	}
+	if got := firstLine("   \n  "); got != "" {
+		t.Errorf("firstLine of blank = %q, want empty", got)
+	}
+}
+
+// withGHExec swaps the package-level gh exec seam for the duration of a test
+// and restores it afterward. Tests using it must not run in parallel.
+func withGHExec(t *testing.T, fn func(args ...string) (bytes.Buffer, bytes.Buffer, error)) {
+	t.Helper()
+	orig := ghExec
+	ghExec = fn
+	t.Cleanup(func() { ghExec = orig })
+}
+
+func bufOf(s string) bytes.Buffer {
+	var b bytes.Buffer
+	b.WriteString(s)
+	return b
+}
+
+func TestResolveLatestTag(t *testing.T) {
+	withGHExec(t, func(args ...string) (bytes.Buffer, bytes.Buffer, error) {
+		return bufOf("v1.2.3\n"), bytes.Buffer{}, nil
+	})
+	got, err := resolveLatestTag("owner/repo")
+	if err != nil {
+		t.Fatalf("resolveLatestTag: %v", err)
+	}
+	if got != "v1.2.3" {
+		t.Errorf("resolveLatestTag = %q, want %q", got, "v1.2.3")
+	}
+
+	withGHExec(t, func(args ...string) (bytes.Buffer, bytes.Buffer, error) {
+		return bytes.Buffer{}, bufOf("release not found"), errors.New("exit 1")
+	})
+	if _, err := resolveLatestTag("owner/repo"); err == nil {
+		t.Errorf("resolveLatestTag: expected error when gh fails")
+	}
+}
+
+func TestVerifyAttestation(t *testing.T) {
+	mgr := NewManager(paths.Dirs{})
+
+	// Verified: gh exits 0.
+	withGHExec(t, func(args ...string) (bytes.Buffer, bytes.Buffer, error) {
+		return bytes.Buffer{}, bytes.Buffer{}, nil
+	})
+	if err := mgr.verifyAttestation("fzf", "junegunn/fzf", "/tmp/fzf.tar.gz"); err != nil {
+		t.Errorf("verifyAttestation(verified) = %v, want nil", err)
+	}
+
+	// Absent: gh fails but stderr indicates no attestation was published.
+	withGHExec(t, func(args ...string) (bytes.Buffer, bytes.Buffer, error) {
+		return bytes.Buffer{}, bufOf("no attestations found for subject"), errors.New("exit 1")
+	})
+	if err := mgr.verifyAttestation("fzf", "junegunn/fzf", "/tmp/fzf.tar.gz"); err != nil {
+		t.Errorf("verifyAttestation(absent) = %v, want nil", err)
+	}
+
+	// Failed: an attestation exists but does not verify.
+	withGHExec(t, func(args ...string) (bytes.Buffer, bytes.Buffer, error) {
+		return bytes.Buffer{}, bufOf("signature verification failed\nmismatched digest"), errors.New("exit 1")
+	})
+	err := mgr.verifyAttestation("fzf", "junegunn/fzf", "/tmp/fzf.tar.gz")
+	if err == nil {
+		t.Fatalf("verifyAttestation(failed) = nil, want error")
+	}
+	if !strings.Contains(err.Error(), "attestation verification failed") {
+		t.Errorf("verifyAttestation(failed) error = %q, want it to mention verification failure", err)
 	}
 }
