@@ -164,6 +164,7 @@ func xzDecompressedName(archivePath string) (string, error) {
 
 // extractTar reads tar entries from r and writes them to destDir, stripping prefix.
 func extractTar(r io.Reader, destDir, prefix string, g *limitGuard) error {
+	cleanDest := filepath.Clean(destDir)
 	tr := tar.NewReader(r)
 	for {
 		hdr, err := tr.Next()
@@ -186,13 +187,16 @@ func extractTar(r io.Reader, destDir, prefix string, g *limitGuard) error {
 			return err
 		}
 
+		// Skip the archive root itself; only real entries are extracted.
+		clean := filepath.Clean(filepath.FromSlash(name))
+		if clean == "." {
+			continue
+		}
 		// Reject entries that escape destDir (Zip-Slip / path traversal).
-		// The strings.HasPrefix check against the cleaned destination is the
-		// canonical guard and is kept inline so it directly dominates the
-		// file operations below.
-		cleanDest := filepath.Clean(destDir)
-		target := filepath.Join(cleanDest, filepath.FromSlash(name))
-		if target != cleanDest && !strings.HasPrefix(target, cleanDest+string(os.PathSeparator)) {
+		// Reaching the file operations below requires this strings.HasPrefix
+		// containment check to pass, so it directly dominates every sink.
+		target := filepath.Join(cleanDest, clean)
+		if !strings.HasPrefix(target, cleanDest+string(os.PathSeparator)) {
 			return fmt.Errorf("tar entry escapes destination: %s", hdr.Name)
 		}
 
@@ -285,6 +289,7 @@ func extractZip(archivePath, destDir string, g *limitGuard) error {
 	}
 	defer r.Close()
 
+	cleanDest := filepath.Clean(destDir)
 	prefix := detectZipPrefix(r)
 
 	for _, f := range r.File {
@@ -300,13 +305,16 @@ func extractZip(archivePath, destDir string, g *limitGuard) error {
 			return err
 		}
 
+		// Skip the archive root itself; only real entries are extracted.
+		clean := filepath.Clean(filepath.FromSlash(name))
+		if clean == "." {
+			continue
+		}
 		// Reject entries that escape destDir (Zip-Slip / path traversal).
-		// The strings.HasPrefix check against the cleaned destination is the
-		// canonical guard and is kept inline so it directly dominates the
-		// file operations below.
-		cleanDest := filepath.Clean(destDir)
-		target := filepath.Join(cleanDest, filepath.FromSlash(name))
-		if target != cleanDest && !strings.HasPrefix(target, cleanDest+string(os.PathSeparator)) {
+		// Reaching the file operations below requires this strings.HasPrefix
+		// containment check to pass, so it directly dominates every sink.
+		target := filepath.Join(cleanDest, clean)
+		if !strings.HasPrefix(target, cleanDest+string(os.PathSeparator)) {
 			return fmt.Errorf("zip entry escapes destination: %s", f.Name)
 		}
 
